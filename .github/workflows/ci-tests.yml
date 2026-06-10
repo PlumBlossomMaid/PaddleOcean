@@ -1,0 +1,180 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [master, "release/*"]
+  pull_request:
+    branches: [master, "release/*"]
+    paths:
+      - "ocean/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/ci-tests.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ==================================================================
+  # Lint (PaddlePaddle code style: ruff-check + ruff-format)
+  # ==================================================================
+  lint:
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.15.0 pre-commit
+
+      - name: Run ruff check
+        run: ruff check ocean/ tests/ --fix --exit-non-zero-on-fix
+
+      - name: Run ruff format
+        run: ruff format ocean/ tests/ --check
+
+      - name: Pre-commit hooks (optional)
+        continue-on-error: true
+        run: pre-commit run --all-files || echo "Pre-commit hooks completed (non-blocking)"
+
+  # ==================================================================
+  # Core tests (CPU) - 全平台, 全 Python 版本
+  # ==================================================================
+  core-tests:
+    runs-on: ${{ matrix.os }}
+    if: github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macOS-14]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install PaddlePaddle (CPU)
+        if: runner.os != 'macOS'
+        run: |
+          python -m pip install --upgrade pip
+          pip install paddlepaddle
+
+      - name: Install PaddlePaddle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install --upgrade pip
+          pip install paddlepaddle
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest pytest-timeout
+
+      - name: Run core tests
+        run: |
+          python -m pytest tests/ -v --timeout=120 -x
+
+  # ==================================================================
+  # Distributed / DDP tests (Linux only, CPU)
+  # ==================================================================
+  distributed-tests:
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install PaddlePaddle (CPU)
+        run: |
+          python -m pip install --upgrade pip
+          pip install paddlepaddle
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout
+
+      - name: Test distributed module imports
+        run: |
+          python -c "
+          import ocean.distributed as od
+          print('is_available:', od.is_available())
+          print('all_reduce:', hasattr(od, 'all_reduce'))
+          print('DataParallel:', hasattr(od, 'DataParallel'))
+          print('fleet:', hasattr(od.fleet, 'init'))
+          print('rpc:', hasattr(od.rpc, 'init_rpc'))
+          "
+
+  # ==================================================================
+  # Import sanity (ensure all modules load correctly)
+  # ==================================================================
+  import-sanity:
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PaddlePaddle
+        run: |
+          pip install paddlepaddle
+
+      - name: Verify all imports
+        run: |
+          python -c "
+          import ocean
+          assert hasattr(ocean, 'Model')
+          assert hasattr(ocean, 'Trainer')
+          assert hasattr(ocean, 'DataModule')
+          assert hasattr(ocean, 'Gear')
+          assert hasattr(ocean, 'Callback')
+          assert hasattr(ocean, 'ModelCheckpoint')
+          assert hasattr(ocean, 'EarlyStopping')
+          assert hasattr(ocean, 'CSVLogger')
+          assert hasattr(ocean, 'VisualDLLogger')
+          assert hasattr(ocean, 'WandbLogger')
+          assert hasattr(ocean, 'MLFlowLogger')
+          assert hasattr(ocean, 'CometLogger')
+          assert hasattr(ocean, 'DDPStrategy')
+          assert hasattr(ocean, 'DeepSpeedStrategy')
+          assert hasattr(ocean, 'FSDPStrategy')
+          assert hasattr(ocean, 'MixedPrecision')
+          assert hasattr(ocean, 'OceanLogger')
+          assert hasattr(ocean, 'OceanEnum')
+          assert hasattr(ocean, 'seed_everything')
+          print('All', len(ocean.__all__), 'exports verified OK')
+          "
+
+      - name: Verify distributed module
+        run: |
+          python -c "
+          import ocean.distributed
+          print('distributed module OK')
+          print('exports:', [x for x in dir(ocean.distributed) if not x.startswith('_')][:15])
+          "
