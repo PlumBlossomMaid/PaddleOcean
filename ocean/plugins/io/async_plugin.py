@@ -2,7 +2,7 @@
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Optional
+from typing import Any
 
 from ocean.plugins.io import PaddleCheckpointIO
 

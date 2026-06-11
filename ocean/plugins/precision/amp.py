@@ -1,8 +1,9 @@
 """Mixed precision (AMP) plugin using PaddlePaddle's native AMP API."""
 
-from typing import Any, Optional
+from typing import Any
 
 import paddle
+
 from ocean.plugins.precision.precision import Precision
 
 

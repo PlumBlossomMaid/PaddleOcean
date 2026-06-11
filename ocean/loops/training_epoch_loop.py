@@ -2,14 +2,12 @@
 
 from typing import Any, Optional
 
-import paddle
-
-from ocean.loops.loop import _Loop
-from ocean.loops.progress import _BatchProgress, _SchedulerProgress
-from ocean.loops.fetchers import _PrefetchDataFetcher
-from ocean.loops.optimization import _AutomaticOptimization, _ManualOptimization
 from ocean.loops.evaluation_loop import _EvaluationLoop
-from ocean.trainer.states import TrainerFn, RunningStage
+from ocean.loops.fetchers import _PrefetchDataFetcher
+from ocean.loops.loop import _Loop
+from ocean.loops.optimization import _AutomaticOptimization, _ManualOptimization
+from ocean.loops.progress import _BatchProgress, _SchedulerProgress
+from ocean.trainer.states import RunningStage, TrainerFn
 
 
 class _TrainingEpochLoop(_Loop):

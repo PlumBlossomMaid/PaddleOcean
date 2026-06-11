@@ -1,6 +1,6 @@
 """Configuration validator for paddleOcean Trainer."""
 
-from typing import Any, Optional
+from typing import Any
 
 
 def _check_num_devices(trainer: Any) -> None:

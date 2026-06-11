@@ -9,8 +9,7 @@ Inspired by Lightning CLI.
 import argparse
 import importlib
 import inspect
-import sys
-from typing import Any, Optional
+from typing import Any
 
 
 class OceanArgumentParser(argparse.ArgumentParser):

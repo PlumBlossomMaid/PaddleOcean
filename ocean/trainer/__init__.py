@@ -5,13 +5,26 @@ from typing import Any, Optional, Union
 
 import paddle
 
-from ocean.trainer.states import TrainerState, TrainerStatus, TrainerFn, RunningStage
-from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook, _call_and_handle_interrupt, _call_setup_hook, _call_configure_model
-from ocean.trainer.connectors import _DataConnector, _LoggerConnector, _CallbackConnector, _CheckpointConnector, _SignalConnector, _AcceleratorConnector
-from ocean.loops.fit_loop import _FitLoop
 from ocean.loops.evaluation_loop import _EvaluationLoop
+from ocean.loops.fit_loop import _FitLoop
 from ocean.loops.prediction_loop import _PredictionLoop
 from ocean.strategies import SingleDeviceStrategy
+from ocean.trainer.call import (
+    _call_and_handle_interrupt,
+    _call_callback_hooks,
+    _call_configure_model,
+    _call_lightning_module_hook,
+    _call_setup_hook,
+)
+from ocean.trainer.connectors import (
+    _AcceleratorConnector,
+    _CallbackConnector,
+    _CheckpointConnector,
+    _DataConnector,
+    _LoggerConnector,
+    _SignalConnector,
+)
+from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerStatus
 
 
 class Trainer:

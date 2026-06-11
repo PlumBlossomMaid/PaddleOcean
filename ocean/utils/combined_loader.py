@@ -1,6 +1,6 @@
 """Combined data loader for multiple dataloaders."""
 
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator
 
 
 class CombinedLoader(Iterator):

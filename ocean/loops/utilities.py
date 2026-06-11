@@ -1,6 +1,6 @@
 """Loop utilities - helper functions for loops."""
 
-from typing import Any, Optional
+from typing import Any
 
 
 def _is_accumulating(trainer: Any) -> bool:

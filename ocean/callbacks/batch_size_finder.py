@@ -1,8 +1,6 @@
 """Batch size finder callback - finds max batch size that fits in memory."""
 
-from typing import Any, Optional
-
-import paddle
+from typing import Any
 
 from ocean.callbacks.callback import Callback
 

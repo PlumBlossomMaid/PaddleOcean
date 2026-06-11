@@ -7,7 +7,6 @@ Automatically detects the installed Paddle version and provides
 """
 
 import re
-from typing import Optional, Tuple
 
 import paddle
 

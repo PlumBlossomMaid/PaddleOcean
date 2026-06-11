@@ -4,8 +4,6 @@ import inspect
 from copy import deepcopy
 from typing import Any, Optional
 
-from paddle.nn import Layer
-
 
 class AttributeDict(dict):
     """A dict with attribute-style access."""

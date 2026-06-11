@@ -1,7 +1,7 @@
 """Loop base class - provides state management for all loop types."""
 
 from abc import ABC
-from typing import Any, Optional
+from typing import Any
 
 
 class _Loop(ABC):

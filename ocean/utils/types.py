@@ -1,6 +1,6 @@
 """Type definitions for paddleOcean."""
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Optional, Union
 
 import paddle
 

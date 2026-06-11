@@ -3,7 +3,7 @@
 Fallback to plain text if rich is not installed.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from ocean.callbacks.model_summary import ModelSummary
 

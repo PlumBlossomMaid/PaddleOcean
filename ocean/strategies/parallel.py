@@ -1,9 +1,7 @@
 """ParallelStrategy - base for multi-device strategies."""
 
 from abc import abstractmethod
-from typing import Any, Optional
-
-import paddle
+from typing import Any
 
 from ocean.strategies.strategy import Strategy
 

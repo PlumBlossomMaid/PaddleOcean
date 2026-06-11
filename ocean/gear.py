@@ -151,6 +151,7 @@ class Gear:
             The seed used.
         """
         import random
+
         import numpy as np
         paddle.seed(seed)
         np.random.seed(seed)

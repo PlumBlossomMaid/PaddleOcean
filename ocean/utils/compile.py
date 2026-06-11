@@ -4,7 +4,7 @@ Equivalent to torch.compile but uses PaddlePaddle's native static graph
 compilation which automatically invokes CINN (if available).
 """
 
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import paddle
 

@@ -1,7 +1,7 @@
 """Launcher base classes for spawning sub-processes in distributed training."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 
 class _Launcher(ABC):

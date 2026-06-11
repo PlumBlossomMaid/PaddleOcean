@@ -1,6 +1,5 @@
 """Parameter tying detection utilities."""
 
-from typing import Any, Optional
 
 import paddle
 

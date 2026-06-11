@@ -3,7 +3,6 @@
 Ensures parameter initialization is synchronized across all devices.
 """
 
-from typing import Any, Optional
 
 import paddle
 

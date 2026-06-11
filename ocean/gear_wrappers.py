@@ -4,7 +4,7 @@ Analogous to Lightning Fabric's wrappers.py.
 Wraps model forward/backward and optimizer step with precision/ddp handling.
 """
 
-from typing import Any, Callable, Optional
+from typing import Any
 
 import paddle
 

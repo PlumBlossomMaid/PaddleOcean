@@ -4,9 +4,9 @@ from typing import Any, Optional
 
 import paddle
 
-from ocean.strategies.strategy import Strategy
 from ocean.accelerators.accelerator import Accelerator
 from ocean.plugins.precision import PrecisionPlugin
+from ocean.strategies.strategy import Strategy
 
 
 class SingleDeviceStrategy(Strategy):

@@ -1,6 +1,5 @@
 """Consolidate sharded checkpoints into a single file."""
 
-from typing import Any, Optional
 
 import paddle
 
@@ -18,8 +17,8 @@ def consolidate_checkpoint(
     Returns:
         Consolidated state dict.
     """
-    import os
     import glob
+    import os
 
     consolidated = {}
     for shard_file in sorted(glob.glob(os.path.join(shard_dir, "*.pdparams"))):

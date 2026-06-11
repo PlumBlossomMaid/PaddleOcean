@@ -8,11 +8,11 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import paddle
+
 from ocean.callbacks.callback import Callback
 from ocean.callbacks.checkpoint import ModelCheckpoint
 from ocean.loggers.base import Logger
 from ocean.loggers.csv_logs import CSVLogger
-
 
 # ====================================================================
 # Data Connector
@@ -263,7 +263,7 @@ class _AcceleratorConnector:
 
     @staticmethod
     def _resolve_accelerator(accelerator: str) -> Any:
-        from ocean.accelerators import CPUAccelerator, CUDAAccelerator, ROCmAccelerator, XPUAccelerator, IPUAccelerator
+        from ocean.accelerators import CPUAccelerator, CUDAAccelerator, IPUAccelerator, ROCmAccelerator, XPUAccelerator
         if accelerator in ("auto", "cpu"):
             if CUDAAccelerator.is_available():
                 return CUDAAccelerator()

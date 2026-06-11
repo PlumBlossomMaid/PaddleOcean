@@ -100,7 +100,6 @@ class WandbLogger(Logger):
 
     def log_hyperparams(self, params: dict[str, Any]) -> None:
         try:
-            import wandb
             self.experiment.config.update(params, allow_val_change=True)
         except Exception:
             pass

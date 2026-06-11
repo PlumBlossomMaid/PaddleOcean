@@ -1,6 +1,6 @@
 """PredictionWriter callback - writes predictions during predict stage."""
 
-from typing import Any, Optional
+from typing import Any
 
 import paddle
 

@@ -1,6 +1,6 @@
 """Rich progress bar callback."""
 
-from typing import Any, Optional
+from typing import Any
 
 from ocean.callbacks.progress.progress_bar import ProgressBar
 

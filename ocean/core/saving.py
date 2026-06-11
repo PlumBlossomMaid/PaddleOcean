@@ -1,11 +1,8 @@
 """Checkpoint saving/loading utilities for Model."""
 
-import os
 from typing import Any, Optional
 
 import paddle
-
-from ocean.core.mixins import AttributeDict, HyperparametersMixin
 
 
 def load_from_checkpoint(

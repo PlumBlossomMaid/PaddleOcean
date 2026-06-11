@@ -1,6 +1,6 @@
 """Base precision plugin for paddleOcean."""
 
-from typing import Any, Optional
+from typing import Any
 
 import paddle
 

@@ -1,10 +1,6 @@
 """EarlyStopping callback - stops training when a monitored metric stops improving."""
 
-import os
-import tempfile
 from typing import Any, Optional
-
-import paddle
 
 from ocean.callbacks.callback import Callback
 

@@ -1,8 +1,6 @@
 """Trainer setup utilities - configuration validation and debug flags."""
 
-from typing import Any, Optional
-
-import paddle
+from typing import Any
 
 
 def _init_debugging_flags(

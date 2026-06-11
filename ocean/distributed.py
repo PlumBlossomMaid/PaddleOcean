@@ -17,12 +17,9 @@ Covers:
 - Environment (ParallelEnv, get_backend, etc.)
 """
 
-import functools
-import os
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import paddle
-
 
 # ====================================================================
 # Initialization and Environment

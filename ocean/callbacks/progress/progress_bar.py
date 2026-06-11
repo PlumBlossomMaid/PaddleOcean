@@ -1,6 +1,5 @@
 """ProgressBar and TQDMProgressBar callbacks."""
 
-import math
 from typing import Any, Optional
 
 from ocean.callbacks.callback import Callback

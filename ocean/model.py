@@ -16,7 +16,6 @@ Lightning mode:
     trainer.fit(model, train_loader)
 """
 
-import os
 from typing import Any, Callable, Optional, Sequence, Union
 
 import paddle

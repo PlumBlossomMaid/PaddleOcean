@@ -1,8 +1,6 @@
 """Upgrade checkpoint format across Ocean versions."""
 
-from typing import Any, Optional
 
-import paddle
 
 
 def upgrade_checkpoint(

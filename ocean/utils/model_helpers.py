@@ -1,6 +1,6 @@
 """Model helpers for paddleOcean."""
 
-from typing import Any, Optional
+from typing import Any
 
 
 def _restricted_classmethod(func: Any) -> Any:

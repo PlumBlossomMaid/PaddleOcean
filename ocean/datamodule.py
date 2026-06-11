@@ -4,7 +4,7 @@ Inspired by LightningDataModule. Manages prepare_data/setup/teardown
 and provides dataloader factory methods.
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 import paddle
 

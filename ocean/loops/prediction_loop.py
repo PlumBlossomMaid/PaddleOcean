@@ -4,8 +4,8 @@ from typing import Any, Optional
 
 import paddle
 
-from ocean.loops.loop import _Loop
 from ocean.loops.fetchers import _DataFetcher
+from ocean.loops.loop import _Loop
 from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook
 
 

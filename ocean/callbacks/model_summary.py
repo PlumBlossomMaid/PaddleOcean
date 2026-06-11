@@ -1,6 +1,6 @@
 """ModelSummary callback - prints a summary of the model before training."""
 
-from typing import Any, Optional
+from typing import Any
 
 from ocean.callbacks.callback import Callback
 

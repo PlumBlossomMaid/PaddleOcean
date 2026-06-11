@@ -1,6 +1,6 @@
 """OnExceptionCheckpoint callback - saves checkpoint on exception."""
 
-from typing import Any, Optional
+from typing import Any
 
 from ocean.callbacks.callback import Callback
 
@@ -21,6 +21,7 @@ class OnExceptionCheckpoint(Callback):
 
     def on_exception(self, trainer: Any, model: Any, exception: BaseException) -> None:
         import os
+
         import paddle
         path = os.path.join(self.dirpath, self.filename)
         checkpoint = {"state_dict": model.state_dict(), "exception": str(exception)}

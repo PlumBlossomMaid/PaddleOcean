@@ -1,7 +1,7 @@
 """Signature utilities - inspect function signatures for hooks."""
 
 import inspect
-from typing import Any, Callable, Optional
+from typing import Callable
 
 
 def is_param_in_hook_signature(

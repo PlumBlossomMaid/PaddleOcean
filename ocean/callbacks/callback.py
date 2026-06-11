@@ -1,6 +1,6 @@
 """Callback base class - all lifecycle hooks with default no-op implementations."""
 
-from typing import Any, Optional
+from typing import Any
 
 
 class Callback:

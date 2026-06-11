@@ -3,6 +3,7 @@
 from typing import Any
 
 import paddle
+
 from ocean.plugins.precision.precision import Precision
 
 

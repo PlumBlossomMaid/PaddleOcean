@@ -4,12 +4,11 @@ Provides fallback implementations for tensor operations that may not exist
 in older PaddlePaddle versions (< 3.0).
 """
 
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import paddle
 
-from ocean._compat.version import PADDLE_VERSION, V_2_5, V_3_0, version_gte
-
+from ocean._compat.version import version_gte
 
 # ====================================================================
 # Creation ops

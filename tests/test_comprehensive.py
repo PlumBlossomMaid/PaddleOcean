@@ -18,8 +18,8 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import paddle
-import ocean
 
+import ocean
 
 # ====================================================================
 # Helper: Lightning-mode model

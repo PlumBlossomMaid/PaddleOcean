@@ -1,8 +1,8 @@
 """MLFlowLogger - logs metrics to MLflow."""
 
 import os
-import time
 import re
+import time
 from typing import Any, Mapping, Optional
 
 from ocean.loggers.base import Logger

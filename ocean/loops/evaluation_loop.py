@@ -1,14 +1,14 @@
 """_EvaluationLoop - runs validation or test loops."""
 
-from typing import Any, Optional
+from typing import Any
 
 import paddle
 
+from ocean.loops.fetchers import _DataFetcher
 from ocean.loops.loop import _Loop
 from ocean.loops.progress import _BatchProgress
-from ocean.loops.fetchers import _DataFetcher
-from ocean.trainer.states import TrainerFn, RunningStage
 from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook
+from ocean.trainer.states import RunningStage, TrainerFn
 
 
 class _EvaluationLoop(_Loop):

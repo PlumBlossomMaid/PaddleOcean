@@ -1,8 +1,9 @@
 """CUDA (GPU) accelerator for PaddlePaddle."""
 
-from typing import Any, Optional
+from typing import Any
 
 import paddle
+
 from ocean.accelerators.accelerator import Accelerator
 
 

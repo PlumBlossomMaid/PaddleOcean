@@ -1,6 +1,6 @@
 """Spike detection callback - detects loss spikes during training."""
 
-from typing import Any, Optional
+from typing import Any
 
 import paddle
 

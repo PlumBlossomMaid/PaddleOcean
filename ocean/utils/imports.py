@@ -1,6 +1,5 @@
 """Import utilities for optional dependencies."""
 
-from typing import Any, Optional
 
 
 def _module_available(module_path: str) -> bool:

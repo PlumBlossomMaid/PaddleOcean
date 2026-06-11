@@ -1,7 +1,6 @@
 """Progress tracking for loops - tracks ready/started/processed/completed counters."""
 
-from copy import deepcopy
-from typing import Any, Optional
+from typing import Any
 
 
 class _ReadyCompletedTracker:

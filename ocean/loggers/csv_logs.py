@@ -2,9 +2,7 @@
 
 import csv
 import os
-from typing import Any, Optional
-
-import paddle
+from typing import Optional
 
 from ocean.loggers.base import Logger
 

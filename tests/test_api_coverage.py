@@ -3,12 +3,8 @@
 This test ensures ocean serves as a complete drop-in replacement for paddle.
 """
 
-import importlib
-import sys
-from typing import Any, List, Tuple
 
 import paddle
-
 
 # APIs that intentionally differ (documented differences)
 INTENTIONAL_DIFFERENCES = {
@@ -185,7 +181,6 @@ def test_ocean_data_types():
 def test_ocean_compat_apis():
     """Verify compat-wrapped APIs work."""
     import ocean
-    import paddle
 
     x = paddle.randn([2, 5])
 
@@ -242,7 +237,6 @@ def test_no_paddle_import():
     assert layer is not None
 
     # Verify ocean.randn is the same function as would be paddle.randn
-    import paddle
     assert ocean.randn is paddle.randn
 
 

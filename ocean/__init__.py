@@ -26,55 +26,73 @@ from typing import Any
 import paddle as _paddle
 
 # ====================================================================
-# Core ocean framework components
-# ====================================================================
-from ocean.model import Model
-from ocean.trainer import Trainer
-from ocean.datamodule import DataModule
-from ocean.gear import Gear
-
-from ocean.accelerators import Accelerator, CPUAccelerator, CUDAAccelerator, GPUAccelerator
-
-from ocean.callbacks import (
-    Callback, ModelCheckpoint, EarlyStopping, LearningRateMonitor,
-    Timer, ModelSummary, RichModelSummary, DeviceStatsMonitor, LambdaCallback,
-    PredictionWriter, BackboneFinetuning, GradientAccumulationScheduler,
-    OnExceptionCheckpoint, ThroughputMonitor, StochasticWeightAveraging,
-    WeightAveraging, ProgressBar, TQDMProgressBar,
-)
-
-from ocean.loggers import Logger, CSVLogger, VisualDLLogger, WandbLogger, MLFlowLogger, CometLogger
-
-from ocean.loops import _Loop, _FitLoop, _TrainingEpochLoop, _EvaluationLoop, _PredictionLoop
-from ocean.strategies import Strategy, SingleDeviceStrategy
-from ocean.plugins import Precision
-
-from ocean.trainer.states import TrainerState, TrainerStatus, TrainerFn, RunningStage
-from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook
-from ocean.trainer.connectors import _DataConnector, _LoggerConnector, _CallbackConnector, _CheckpointConnector
-
-from ocean.core.hooks import ModelHooks, DataHooks
-from ocean.core.mixins import HyperparametersMixin
-from ocean.core.optimizer import OceanOptimizer, init_optimizers_and_lr_schedulers
-from ocean.core.saving import load_from_checkpoint
-
-from ocean.utils.types import STEP_OUTPUT, EVALUATE_OUTPUT, PREDICT_OUTPUT
-
-# ====================================================================
 # Compat-wrapped APIs
 # ====================================================================
 from ocean._compat.tensor import (
-    repeat_interleave, index_add, scatter_along_axis, scatter_nd,
-    take_along_axis, put_along_axis,
-    masked_fill, masked_select,
-    sort, argsort, unique, nonzero,
-    logsumexp, lgamma,
+    argsort,
+    index_add,
+    lgamma,
+    logsumexp,
+    masked_fill,
+    masked_select,
+    nonzero,
+    put_along_axis,
+    repeat_interleave,
+    scatter_along_axis,
+    scatter_nd,
+    sort,
+    take_along_axis,
+    unique,
 )
 
 # ====================================================================
 # Version info
 # ====================================================================
-from ocean._compat.version import Version, PADDLE_VERSION, version_gte, version_lt
+from ocean._compat.version import PADDLE_VERSION, Version, version_gte, version_lt
+from ocean.accelerators import Accelerator, CPUAccelerator, CUDAAccelerator, GPUAccelerator
+from ocean.callbacks import (
+    BackboneFinetuning,
+    Callback,
+    DeviceStatsMonitor,
+    EarlyStopping,
+    GradientAccumulationScheduler,
+    LambdaCallback,
+    LearningRateMonitor,
+    ModelCheckpoint,
+    ModelSummary,
+    OnExceptionCheckpoint,
+    PredictionWriter,
+    ProgressBar,
+    RichModelSummary,
+    StochasticWeightAveraging,
+    ThroughputMonitor,
+    Timer,
+    TQDMProgressBar,
+    WeightAveraging,
+)
+from ocean.core.hooks import DataHooks, ModelHooks
+from ocean.core.mixins import HyperparametersMixin
+from ocean.core.optimizer import OceanOptimizer, init_optimizers_and_lr_schedulers
+from ocean.core.saving import load_from_checkpoint
+from ocean.datamodule import DataModule
+from ocean.gear import Gear
+from ocean.loggers import CometLogger, CSVLogger, Logger, MLFlowLogger, VisualDLLogger, WandbLogger
+from ocean.loggers.ocelogger import OceanLogger, Ocelogger
+from ocean.loops import _EvaluationLoop, _FitLoop, _Loop, _PredictionLoop, _TrainingEpochLoop
+
+# ====================================================================
+# Core ocean framework components
+# ====================================================================
+from ocean.model import Model
+from ocean.plugins import MixedPrecision, Precision
+from ocean.strategies import DDPStrategy, DeepSpeedStrategy, FSDPStrategy, SingleDeviceStrategy, Strategy
+from ocean.trainer import Trainer
+from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook
+from ocean.trainer.connectors import _CallbackConnector, _CheckpointConnector, _DataConnector, _LoggerConnector
+from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerStatus
+from ocean.utils.enums import OceanEnum
+from ocean.utils.seed import seed_everything
+from ocean.utils.types import EVALUATE_OUTPUT, PREDICT_OUTPUT, STEP_OUTPUT
 
 __version__ = "0.1.0"
 
@@ -95,12 +113,21 @@ __all__ = [
     "ProgressBar", "TQDMProgressBar",
     # Loggers
     "Logger", "CSVLogger", "VisualDLLogger", "WandbLogger", "MLFlowLogger", "CometLogger",
+    "OceanLogger", "Ocelogger",
+    # Strategies
+    "DDPStrategy", "DeepSpeedStrategy", "FSDPStrategy",
+    # Plugins
+    "MixedPrecision",
+    # Enums
+    "OceanEnum",
     # Compat APIs
     "repeat_interleave", "index_add", "scatter_along_axis", "scatter_nd",
     "take_along_axis", "put_along_axis", "masked_fill", "masked_select",
     "sort", "argsort", "unique", "nonzero", "logsumexp", "lgamma",
     # Version
     "Version", "PADDLE_VERSION", "version_gte", "version_lt",
+    # Ocean utilities
+    "seed_everything",
 ]
 
 

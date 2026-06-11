@@ -4,15 +4,15 @@ Tests both Keras mode (ocean.Model with __model__) and Lightning mode
 (user subclass of ocean.Model with hooks).
 """
 
-import sys
 import os
+import sys
 
 # Ensure the package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import paddle
-import ocean
 
+import ocean
 
 # ====================================================================
 # Lightning-mode model

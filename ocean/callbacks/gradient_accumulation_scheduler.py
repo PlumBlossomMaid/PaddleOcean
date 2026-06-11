@@ -1,6 +1,6 @@
 """GradientAccumulationScheduler - changes gradient accumulation schedule."""
 
-from typing import Any, Optional
+from typing import Any
 
 from ocean.callbacks.callback import Callback
 

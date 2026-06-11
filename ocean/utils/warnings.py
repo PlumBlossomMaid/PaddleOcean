@@ -1,8 +1,6 @@
 """Warning utilities for paddleOcean."""
 
-import logging
 import warnings
-from typing import Any, Optional
 
 
 def rank_zero_warn(msg: str) -> None:

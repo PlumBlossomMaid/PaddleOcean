@@ -6,8 +6,8 @@ from typing import Any, Optional
 import paddle
 
 from ocean.accelerators.accelerator import Accelerator
-from ocean.plugins.precision.precision import Precision
 from ocean.plugins.precision import PrecisionPlugin
+from ocean.plugins.precision.precision import Precision
 
 
 class Strategy(ABC):
