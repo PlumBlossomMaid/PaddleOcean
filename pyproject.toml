@@ -28,6 +28,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]
+"ocean/__init__.py" = ["E402"]
 "**/tests/**" = ["F841"]
 "ocean/distributed.py" = ["N801", "N802"]
 "ocean/loggers/tensorboard.py" = ["F401"]

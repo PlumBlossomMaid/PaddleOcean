@@ -19,8 +19,8 @@ Usage::
 """
 
 import importlib
-import warnings
 import sys
+import warnings
 from types import ModuleType
 from typing import Any
 
