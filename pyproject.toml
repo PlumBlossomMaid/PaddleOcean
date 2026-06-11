@@ -8,9 +8,7 @@ name = "paddle-ocean"
 version = "0.1.0"
 description = "A high-level PaddlePaddle framework inspired by PyTorch Lightning"
 requires-python = ">=3.9"
-dependencies = [
-    "paddlepaddle>=2.4",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [

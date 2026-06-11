@@ -19,11 +19,22 @@ Usage::
 """
 
 import importlib
+import warnings
 import sys
 from types import ModuleType
 from typing import Any
 
 import paddle as _paddle
+
+# ====================================================================
+# Suppress verbose PaddlePaddle warnings (noisy per-batch info)
+# ====================================================================
+warnings.filterwarnings(
+    "ignore",
+    message="When training, we now always track global mean and variance",
+    category=UserWarning,
+    module="paddle.nn.layer.norm",
+)
 
 # ====================================================================
 # Compat-wrapped APIs
