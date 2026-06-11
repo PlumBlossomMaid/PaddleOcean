@@ -209,6 +209,14 @@ class _PaddleProxy(ModuleType):
         except (ImportError, ModuleNotFoundError):
             pass
 
+        # Check ocean submodules (ocean.metrics, ocean.utils, ...)
+        try:
+            ocean_sub = importlib.import_module(f"ocean.{name}")
+            setattr(self, name, ocean_sub)
+            return ocean_sub
+        except (ImportError, ModuleNotFoundError):
+            pass
+
         # Fall through to paddle
         paddle_attr = getattr(_paddle, name, None)
         if paddle_attr is not None:
