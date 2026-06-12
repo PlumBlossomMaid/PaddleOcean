@@ -124,7 +124,10 @@ class Model(nn.Layer):
     def test_step(self, batch: Any, batch_idx: int) -> Any: ...
 
     def predict_step(self, batch: Any, batch_idx: int = 0) -> Any:
-        return self.__model__(batch) if self.__model__ is not None else self(batch)
+        model = self.__model__ if self.__model__ is not None else self
+        if isinstance(batch, (list, tuple)):
+            return model(batch[0])
+        return model(batch)
 
     def configure_optimizers(self) -> Any:
         raise NotImplementedError("configure_optimizers must be implemented")
