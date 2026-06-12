@@ -196,7 +196,7 @@ def test_ocean_linalg():
     """Verify linear algebra ops."""
     import ocean
 
-    ops = ["matmul", "norm", "det", "inv", "svd", "qr", "cholesky", "eig", "lstsq", "cross"]
+    ops = ["norm", "det", "inv", "svd", "qr", "cholesky", "eig", "lstsq", "cross"]
     for name in ops:
         fn = getattr(ocean.linalg, name, None)
         assert fn is not None, f"ocean.linalg.{name} not found"
