@@ -2,7 +2,7 @@
 
 from ocean.callbacks.callback import Callback
 from ocean.callbacks.checkpoint import ModelCheckpoint
-from ocean.callbacks.device_stats_monitor import DeviceStatsMonitor
+from ocean.callbacks.device_stats import DeviceStatsMonitor
 from ocean.callbacks.early_stopping import EarlyStopping
 from ocean.callbacks.finetuning import BackboneFinetuning
 from ocean.callbacks.gradient_accumulation_scheduler import GradientAccumulationScheduler

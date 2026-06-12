@@ -75,12 +75,14 @@ class _FitLoop(_Loop):
                     opt_acc += 1
 
                     if opt_acc >= trainer.accumulate_grad_batches:
-                        if trainer.gradient_clip_val is not None:
-                            paddle.nn.utils.clip_grad_norm_(model.parameters(), trainer.gradient_clip_val)
+                        if trainer.gradient_clip_val is not None and trainer.gradient_clip_val > 0:
+                            if trainer.gradient_clip_algorithm == "norm":
+                                paddle.nn.utils.clip_grad_norm_(model.parameters(), trainer.gradient_clip_val)
+                            elif trainer.gradient_clip_algorithm == "value":
+                                paddle.nn.utils.clip_grad_value_(model.parameters(), trainer.gradient_clip_val)
                         model.on_before_optimizer_step(trainer._optimizer)
-                        trainer._optimizer.step()
-                        trainer._optimizer.clear_grad()
-                        trainer._optimizer_step += 1
+                        trainer._optimizers[0].step()
+                        trainer._optimizers[0]._optimizer.clear_grad()
                         opt_acc = 0
                         trainer._dataloader_step += 1
 

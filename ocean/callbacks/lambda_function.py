@@ -23,6 +23,10 @@ class LambdaCallback(Callback):
         on_validation_batch_end: Function called on validation batch end.
         on_test_start: Function called on test start.
         on_test_end: Function called on test end.
+        on_before_backward: Function called before backward.
+        on_after_backward: Function called after backward.
+        on_before_optimizer_step: Function called before optimizer step.
+        on_epoch_end: Function called at epoch end.
         on_exception: Function called on exception.
     """
 
@@ -42,6 +46,10 @@ class LambdaCallback(Callback):
         on_validation_batch_end: Optional[Callable] = None,
         on_test_start: Optional[Callable] = None,
         on_test_end: Optional[Callable] = None,
+        on_before_backward: Optional[Callable] = None,
+        on_after_backward: Optional[Callable] = None,
+        on_before_optimizer_step: Optional[Callable] = None,
+        on_epoch_end: Optional[Callable] = None,
         on_exception: Optional[Callable] = None,
     ) -> None:
         self._on_fit_start = on_fit_start
@@ -58,6 +66,10 @@ class LambdaCallback(Callback):
         self._on_validation_batch_end = on_validation_batch_end
         self._on_test_start = on_test_start
         self._on_test_end = on_test_end
+        self._on_before_backward = on_before_backward
+        self._on_after_backward = on_after_backward
+        self._on_before_optimizer_step = on_before_optimizer_step
+        self._on_epoch_end = on_epoch_end
         self._on_exception = on_exception
 
     def on_fit_start(self, trainer: Any, model: Any) -> None:
@@ -83,6 +95,10 @@ class LambdaCallback(Callback):
     def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
         if self._on_train_epoch_end:
             self._on_train_epoch_end(trainer, model)
+
+    def on_epoch_end(self, trainer: Any, model: Any) -> None:
+        if self._on_epoch_end:
+            self._on_epoch_end(trainer, model)
 
     def on_train_batch_start(self, trainer: Any, model: Any, batch: Any, batch_idx: int) -> None:
         if self._on_train_batch_start:
@@ -119,6 +135,18 @@ class LambdaCallback(Callback):
     def on_test_end(self, trainer: Any, model: Any) -> None:
         if self._on_test_end:
             self._on_test_end(trainer, model)
+
+    def on_before_backward(self, trainer: Any, model: Any, loss: Any) -> None:
+        if self._on_before_backward:
+            self._on_before_backward(trainer, model, loss)
+
+    def on_after_backward(self, trainer: Any, model: Any) -> None:
+        if self._on_after_backward:
+            self._on_after_backward(trainer, model)
+
+    def on_before_optimizer_step(self, trainer: Any, model: Any, optimizer: Any) -> None:
+        if self._on_before_optimizer_step:
+            self._on_before_optimizer_step(trainer, model, optimizer)
 
     def on_exception(self, trainer: Any, model: Any, exception: BaseException) -> None:
         if self._on_exception:

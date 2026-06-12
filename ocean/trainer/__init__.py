@@ -142,6 +142,8 @@ class Trainer:
         self.current_epoch: int = 0
         self._dataloader_step: int = 0
         self._optimizer_step: int = 0
+        self._optimizers: list = []
+        self._optimizer: Any = None  # kept for backward compat
         self.should_stop: bool = False
 
         # === Model & Data ===
@@ -312,9 +314,13 @@ class Trainer:
         model.to(device)
 
         # Optimizer & Strategy setup
-        self._optimizer = self._resolve_optimizer(model)
-        if self._optimizer is not None:
-            self.strategy._optimizers = [self._optimizer]
+        self._optimizers = self._resolve_optimizers(model)
+        if self._optimizers:
+            self.strategy._optimizers = [o._optimizer for o in self._optimizers]
+            # Set up auto-increment for optimizer steps
+            for o in self._optimizers:
+                o._on_after_step = lambda: self._advance_optimizer_step()
+            self._optimizer = self._optimizers[0]._optimizer  # backward compat
 
         # Checkpoint restore
         if ckpt_path is not None:
@@ -338,6 +344,9 @@ class Trainer:
         _call_lightning_module_hook(self, "on_fit_end")
         _call_callback_hooks(self, "on_fit_end")
         self._teardown()
+
+    def _advance_optimizer_step(self) -> None:
+        self._optimizer_step += 1
 
     # ====================================================================
     # Validate / Test / Predict
@@ -474,13 +483,14 @@ class Trainer:
             raise RuntimeError("CUDA not available")
         return paddle.CPUPlace()
 
-    def _resolve_optimizer(self, model: Any) -> Optional[paddle.optimizer.Optimizer]:
-        if model._optimizer is not None:
-            return model._optimizer
-        from ocean.core.optimizer import init_optimizers_and_lr_schedulers
+    def _resolve_optimizers(self, model: Any) -> list:
+        """Configure all optimizers from the model, wrapped in OceanOptimizer."""
+        from ocean.core.optimizer import OceanOptimizer, init_optimizers_and_lr_schedulers
 
+        if model._optimizer is not None:
+            return [OceanOptimizer(model._optimizer)]
         opts, _ = init_optimizers_and_lr_schedulers(model)
-        return opts[0] if opts else None
+        return [OceanOptimizer(opt) for opt in opts]
 
     def _move_to_device(self, batch: Any, device: Any) -> Any:
         if isinstance(batch, paddle.Tensor):

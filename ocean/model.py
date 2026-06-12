@@ -2,7 +2,7 @@
 
 Keras mode:
     net = paddle.nn.Sequential(...)
-    model = ocean.Model(__model__=net)
+    model = ocean.Model(net)
     model.compile(optimizer=..., loss=..., metrics=...)
     model.fit(train_loader, val_loader, epochs=10)
 
@@ -23,17 +23,17 @@ from paddle import nn
 
 
 class Model(nn.Layer):
-    """Dual-mode model: Keras (via __model__) or Lightning (via hooks).
+    """Dual-mode model: Keras (via model) or Lightning (via hooks).
 
     Args:
-        __model__: Optional bare nn.Layer for Keras mode.
+        model: Optional bare nn.Layer for Keras mode.
     """
 
-    def __init__(self, __model__: Optional[nn.Layer] = None) -> None:
+    def __init__(self, model: Optional[nn.Layer] = None) -> None:
         super().__init__()
 
         # --- Keras mode members ---
-        self.__model__: Optional[nn.Layer] = __model__
+        self.__model__: Optional[nn.Layer] = model
         self._optimizer: Optional[paddle.optimizer.Optimizer] = None
         self._loss_fns: list[Callable] = []
         self._loss_weights: Optional[list[float]] = None
@@ -101,7 +101,7 @@ class Model(nn.Layer):
         loss_weights: Optional[list[float]] = None,
     ) -> None:
         if self.__model__ is None:
-            raise ValueError("compile() requires __model__. Use ocean.Model(__model__=your_network) for Keras mode.")
+            raise ValueError("compile() requires model. Use ocean.Model(model=your_network) for Keras mode.")
         self._optimizer = optimizer
         self._loss_fns = [loss] if callable(loss) else (list(loss) if loss is not None else [])
         self._loss_weights = loss_weights
@@ -123,12 +123,8 @@ class Model(nn.Layer):
     def validation_step(self, batch: Any, batch_idx: int) -> Any: ...
     def test_step(self, batch: Any, batch_idx: int) -> Any: ...
 
-    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        if self.__model__ is not None:
-            return self.__model__(batch)
-        if isinstance(batch, (list, tuple)):
-            return self(*batch) if len(batch) > 1 else self(batch[0])
-        return self(batch)
+    def predict_step(self, batch: Any, batch_idx: int = 0) -> Any:
+        return self.__model__(batch) if self.__model__ is not None else self(batch)
 
     def configure_optimizers(self) -> Any:
         raise NotImplementedError("configure_optimizers must be implemented")
