@@ -81,19 +81,19 @@ class _FitLoop(_Loop):
                         trainer._optimizer.step()
                         trainer._optimizer.clear_grad()
                         opt_acc = 0
-                        trainer.global_step += 1
+                        trainer._dataloader_step += 1
 
                 model.on_train_batch_end(result, batch, batch_idx)
 
                 # Logging
                 if (
-                    trainer.global_step > 0
-                    and trainer.global_step % trainer.log_every_n_steps == 0
+                    trainer.dataloader_step > 0
+                    and trainer.dataloader_step % trainer.log_every_n_steps == 0
                     and trainer.verbose > 0
                 ):
-                    trainer._print(f"  train step {trainer.global_step}")
+                    trainer._print(f"  train step {trainer.dataloader_step}")
 
-                if 0 < trainer.max_steps <= trainer.global_step:
+                if 0 < trainer.max_steps <= trainer.dataloader_step:
                     trainer.should_stop = True
                     break
 
@@ -101,7 +101,7 @@ class _FitLoop(_Loop):
             if opt_acc > 0 and trainer._optimizer is not None:
                 trainer._optimizer.step()
                 trainer._optimizer.clear_grad()
-                trainer.global_step += 1
+                trainer._dataloader_step += 1
 
             # On epoch end
             trainer._compute_epoch_metrics()

@@ -32,6 +32,5 @@ def migrate_checkpoint(
     # Ensure metadata
     ckpt.setdefault("paddle_ocean_version", to_version)
     ckpt.setdefault("epoch", 0)
-    ckpt.setdefault("global_step", 0)
 
     return ckpt

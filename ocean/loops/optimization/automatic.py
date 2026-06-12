@@ -64,7 +64,7 @@ class _AutomaticOptimization:
                 model.on_before_optimizer_step(optimizer)
                 optimizer.step()
                 optimizer.clear_grad()
-                self.trainer.global_step += 1
+                self.trainer._optimizer_step += 1
 
         # Call model's on_train_batch_end (should be in the loop, not here)
         return result if isinstance(result, dict) else {"loss": loss}

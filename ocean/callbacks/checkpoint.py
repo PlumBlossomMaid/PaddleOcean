@@ -56,7 +56,7 @@ class ModelCheckpoint(Callback):
         self.best_model_score: Optional[float] = None
         self.last_model_path: str = ""
         self.current_score: Optional[float] = None
-        self._last_global_step_saved: int = 0
+        self._last_dataloader_step_saved: int = 0
         self._monitor_op = (lambda a, b: a < b) if mode == "min" else (lambda a, b: a > b)
 
         os.makedirs(self.dirpath, exist_ok=True)
@@ -71,9 +71,9 @@ class ModelCheckpoint(Callback):
 
     def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self.every_n_train_steps is not None:
-            if trainer.global_step - self._last_global_step_saved >= self.every_n_train_steps:
+            if trainer.dataloader_step - self._last_dataloader_step_saved >= self.every_n_train_steps:
                 self._save(trainer, model, monitor_candidates={})
-                self._last_global_step_saved = trainer.global_step
+                self._last_dataloader_step_saved = trainer.dataloader_step
 
     def _save_if_needed(self, trainer: Any, model: Any) -> None:
         monitor_candidates = {}
@@ -85,7 +85,7 @@ class ModelCheckpoint(Callback):
 
     def _save(self, trainer: Any, model: Any, monitor_candidates: dict) -> None:
         epoch = trainer.current_epoch + 1
-        step = trainer.global_step
+        step = trainer.dataloader_step
 
         # Save "last" checkpoint
         if self.save_last:
@@ -124,7 +124,8 @@ class ModelCheckpoint(Callback):
             checkpoint = {
                 "state_dict": model.state_dict(),
                 "epoch": model._trainer.current_epoch if model._trainer else 0,
-                "global_step": model._trainer.global_step if model._trainer else 0,
+                "dataloader_step": model._trainer.dataloader_step if model._trainer else 0,
+                "optimizer_step": model._trainer.optimizer_step if model._trainer else 0,
             }
             if hasattr(model, "_optimizer") and model._optimizer is not None:
                 checkpoint["optimizer"] = model._optimizer.state_dict()

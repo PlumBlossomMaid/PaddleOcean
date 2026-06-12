@@ -32,11 +32,11 @@ class _TrainingEpochLoop(_Loop):
     def done(self) -> bool:
         if self.trainer.should_stop:
             return True
-        return self.global_step >= self.max_steps if self.max_steps > 0 else False
+        return self.dataloader_step >= self.max_steps if self.max_steps > 0 else False
 
     @property
-    def global_step(self) -> int:
-        return self.trainer.global_step
+    def dataloader_step(self) -> int:
+        return self.trainer.dataloader_step
 
     def run(self, data_fetcher: Any) -> None:
         self._data_fetcher = data_fetcher

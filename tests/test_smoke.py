@@ -112,7 +112,7 @@ def test_model_lightning_mode():
     trainer.fit(model, datamodule=dm)
 
     assert model._trainer is not None
-    assert trainer.global_step > 0
+    assert trainer.dataloader_step > 0
     assert trainer.current_epoch == 2
 
 
@@ -128,7 +128,7 @@ def test_model_lightning_mode_direct_dataloaders():
     trainer = ocean.Trainer(max_epochs=2, log_every_n_steps=10, verbose=0)
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
-    assert trainer.global_step > 0
+    assert trainer.dataloader_step > 0
 
 
 def test_model_keras_mode():

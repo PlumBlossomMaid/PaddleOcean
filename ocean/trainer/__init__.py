@@ -140,7 +140,8 @@ class Trainer:
         # === State ===
         self.state = TrainerState()
         self.current_epoch: int = 0
-        self.global_step: int = 0
+        self._dataloader_step: int = 0
+        self._optimizer_step: int = 0
         self.should_stop: bool = False
 
         # === Model & Data ===
@@ -245,6 +246,14 @@ class Trainer:
     @property
     def logged_metrics(self) -> dict[str, float]:
         return self._logger_connector.logged_metrics
+
+    @property
+    def dataloader_step(self) -> int:
+        return self._dataloader_step
+
+    @property
+    def optimizer_step(self) -> int:
+        return self._optimizer_step
 
     @property
     def is_global_zero(self) -> bool:
@@ -502,7 +511,7 @@ class Trainer:
         return self.current_epoch % self.check_val_every_n_epoch == 0
 
     def _should_stop(self) -> bool:
-        return self.should_stop or (0 < self.max_steps <= self.global_step)
+        return self.should_stop or (0 < self.max_steps <= self._dataloader_step)
 
     def _should_limit_batches(self, batch_idx: int, mode: str) -> bool:
         limit = getattr(self, f"limit_{mode}_batches", 1.0)

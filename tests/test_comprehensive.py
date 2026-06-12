@@ -114,7 +114,7 @@ def test_model_lightning_mode():
     dm = RandomDataModule(num_samples=30, batch_size=8)
     trainer.fit(model, datamodule=dm)
     assert model._trainer is not None
-    assert trainer.global_step > 0
+    assert trainer.dataloader_step > 0
     assert trainer.current_epoch == 2
 
 
@@ -122,7 +122,7 @@ def test_model_lightning_direct_dataloaders():
     model = LinearModel()
     trainer = ocean.Trainer(max_epochs=2, verbose=0)
     trainer.fit(model, train_dataloaders=make_train_loader(), val_dataloaders=make_val_loader())
-    assert trainer.global_step > 0
+    assert trainer.dataloader_step > 0
 
 
 def test_model_keras_mode():
@@ -140,7 +140,7 @@ def test_model_properties():
     model = LinearModel()
     assert model.automatic_optimization is True
     assert model.current_epoch == 0
-    assert model.global_step == 0
+    assert model.dataloader_step == 0
     model.automatic_optimization = False
     assert model.automatic_optimization is False
 
@@ -216,7 +216,7 @@ def test_trainer_accumulate_grad():
     model = LinearModel()
     trainer = ocean.Trainer(max_epochs=1, accumulate_grad_batches=2, verbose=0)
     trainer.fit(model, train_dataloaders=make_train_loader(16, 4))
-    assert trainer.global_step > 0
+    assert trainer.dataloader_step > 0
 
 
 # --- DataModule tests ---
@@ -451,7 +451,7 @@ def test_fast_dev_run():
     model = LinearModel()
     trainer = ocean.Trainer(fast_dev_run=2, verbose=0)
     trainer.fit(model, train_dataloaders=make_train_loader(50, 8), val_dataloaders=make_val_loader(20, 8))
-    assert trainer.global_step > 0
+    assert trainer.dataloader_step > 0
 
 
 # --- import test ---

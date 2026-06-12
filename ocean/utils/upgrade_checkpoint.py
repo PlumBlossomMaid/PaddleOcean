@@ -19,7 +19,6 @@ def upgrade_checkpoint(
     ckpt = dict(checkpoint)
     ckpt.setdefault("paddle_ocean_version", to_version)
     ckpt.setdefault("epoch", 0)
-    ckpt.setdefault("global_step", 0)
 
     if "state_dict" not in ckpt and "model" in ckpt:
         ckpt["state_dict"] = ckpt.pop("model")

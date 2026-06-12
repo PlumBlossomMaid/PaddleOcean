@@ -200,15 +200,18 @@ class _CheckpointConnector:
 
         if "epoch" in ckpt:
             self.trainer.current_epoch = ckpt["epoch"]
-        if "global_step" in ckpt:
-            self.trainer.global_step = ckpt["global_step"]
+        if "dataloader_step" in ckpt:
+            self.trainer._dataloader_step = ckpt["dataloader_step"]
+        if "optimizer_step" in ckpt:
+            self.trainer._optimizer_step = ckpt["optimizer_step"]
 
     def dump_checkpoint(self, weights_only: bool = False) -> dict:
         """Build a complete checkpoint dictionary."""
         model = self.trainer._model
         checkpoint = {
             "epoch": self.trainer.current_epoch,
-            "global_step": self.trainer.global_step,
+            "dataloader_step": self.trainer.dataloader_step,
+            "optimizer_step": self.trainer.optimizer_step,
             "state_dict": model.state_dict(),
         }
         if not weights_only and self.trainer._optimizer is not None:

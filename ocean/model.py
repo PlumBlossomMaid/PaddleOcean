@@ -65,8 +65,12 @@ class Model(nn.Layer):
         return self._trainer.current_epoch if self._trainer else 0
 
     @property
-    def global_step(self) -> int:
-        return self._trainer.global_step if self._trainer else 0
+    def dataloader_step(self) -> int:
+        return self._trainer.dataloader_step if self._trainer else 0
+
+    @property
+    def optimizer_step(self) -> int:
+        return self._trainer.optimizer_step if self._trainer else 0
 
     @property
     def example_input_array(self) -> Any:
@@ -216,7 +220,8 @@ class Model(nn.Layer):
         if self._optimizer is not None:
             state["optimizer"] = self._optimizer.state_dict()
         state["epoch"] = self.current_epoch
-        state["global_step"] = self.global_step
+        state["dataloader_step"] = self.dataloader_step
+        state["optimizer_step"] = self.optimizer_step
         paddle.save(state, path)
 
     def load_checkpoint(
