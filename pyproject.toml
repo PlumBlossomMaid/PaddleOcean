@@ -27,7 +27,7 @@ compat-test = [
 [tool.ruff]
 line-length = 120
 target-version = "py39"
-exclude = [".git", ".github"]
+exclude = [".git", ".github", "ocean/_compat/audio/", "tests/compat/"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N"]
