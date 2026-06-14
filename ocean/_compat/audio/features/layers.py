@@ -16,10 +16,9 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING, Literal
 
-from typing_extensions import TypeAlias
-
 import paddle
 from paddle import nn
+from typing_extensions import TypeAlias
 
 from ..functional import compute_fbank_matrix, create_dct, power_to_db
 from ..functional.window import get_window
@@ -28,19 +27,19 @@ if TYPE_CHECKING:
     from paddle import Tensor
 
 _WindowLiteral: TypeAlias = Literal[
-    'hamming',
-    'hann',
-    'kaiser',
-    'bartlett',
-    'nuttall',
-    'gaussian',
-    'exponential',
-    'triang',
-    'bohman',
-    'blackman',
-    'cosine',
-    'tukey',
-    'taylor',
+    "hamming",
+    "hann",
+    "kaiser",
+    "bartlett",
+    "nuttall",
+    "gaussian",
+    "exponential",
+    "triang",
+    "bohman",
+    "blackman",
+    "cosine",
+    "tukey",
+    "taylor",
 ]
 
 
@@ -88,23 +87,21 @@ class Spectrogram(nn.Layer):
         n_fft: int = 512,
         hop_length: int | None = 512,
         win_length: int | None = None,
-        window: _WindowLiteral = 'hann',
+        window: _WindowLiteral = "hann",
         power: float = 1.0,
         center: bool = True,
-        pad_mode: Literal['reflect'] = 'reflect',
-        dtype: str = 'float32',
+        pad_mode: Literal["reflect"] = "reflect",
+        dtype: str = "float32",
     ) -> None:
         super().__init__()
 
-        assert power > 0, 'Power of spectrogram must be > 0.'
+        assert power > 0, "Power of spectrogram must be > 0."
         self.power = power
 
         if win_length is None:
             win_length = n_fft
 
-        self.fft_window = get_window(
-            window, win_length, fftbins=True, dtype=dtype
-        )
+        self.fft_window = get_window(window, win_length, fftbins=True, dtype=dtype)
         self._stft = partial(
             paddle.signal.stft,
             n_fft=n_fft,
@@ -114,7 +111,7 @@ class Spectrogram(nn.Layer):
             center=center,
             pad_mode=pad_mode,
         )
-        self.register_buffer('fft_window', self.fft_window)
+        self.register_buffer("fft_window", self.fft_window)
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -172,7 +169,7 @@ class MelSpectrogram(nn.Layer):
     f_min: float
     f_max: float
     htk: bool
-    norm: Literal['slaney'] | float
+    norm: Literal["slaney"] | float
     fbank_matrix: Tensor
 
     def __init__(
@@ -181,16 +178,16 @@ class MelSpectrogram(nn.Layer):
         n_fft: int = 2048,
         hop_length: int | None = 512,
         win_length: int | None = None,
-        window: _WindowLiteral = 'hann',
+        window: _WindowLiteral = "hann",
         power: float = 2.0,
         center: bool = True,
-        pad_mode: Literal['reflect'] = 'reflect',
+        pad_mode: Literal["reflect"] = "reflect",
         n_mels: int = 64,
         f_min: float = 50.0,
         f_max: float | None = None,
         htk: bool = False,
-        norm: Literal['slaney'] | float = 'slaney',
-        dtype: str = 'float32',
+        norm: Literal["slaney"] | float = "slaney",
+        dtype: str = "float32",
     ) -> None:
         super().__init__()
 
@@ -221,7 +218,7 @@ class MelSpectrogram(nn.Layer):
             norm=norm,
             dtype=dtype,
         )
-        self.register_buffer('fbank_matrix', self.fbank_matrix)
+        self.register_buffer("fbank_matrix", self.fbank_matrix)
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -288,19 +285,19 @@ class LogMelSpectrogram(nn.Layer):
         n_fft: int = 512,
         hop_length: int | None = None,
         win_length: int | None = None,
-        window: _WindowLiteral = 'hann',
+        window: _WindowLiteral = "hann",
         power: float = 2.0,
         center: bool = True,
-        pad_mode: Literal['reflect'] = 'reflect',
+        pad_mode: Literal["reflect"] = "reflect",
         n_mels: int = 64,
         f_min: float = 50.0,
         f_max: float | None = None,
         htk: bool = False,
-        norm: Literal['slaney'] | float = 'slaney',
+        norm: Literal["slaney"] | float = "slaney",
         ref_value: float = 1.0,
         amin: float = 1e-10,
         top_db: float | None = None,
-        dtype: str = 'float32',
+        dtype: str = "float32",
     ) -> None:
         super().__init__()
 
@@ -395,24 +392,22 @@ class MFCC(nn.Layer):
         n_fft: int = 512,
         hop_length: int | None = None,
         win_length: int | None = None,
-        window: _WindowLiteral = 'hann',
+        window: _WindowLiteral = "hann",
         power: float = 2.0,
         center: bool = True,
-        pad_mode: Literal['reflect'] = 'reflect',
+        pad_mode: Literal["reflect"] = "reflect",
         n_mels: int = 64,
         f_min: float = 50.0,
         f_max: float | None = None,
         htk: bool = False,
-        norm: Literal['slaney'] | float = 'slaney',
+        norm: Literal["slaney"] | float = "slaney",
         ref_value: float = 1.0,
         amin: float = 1e-10,
         top_db: float | None = None,
-        dtype: str = 'float32',
+        dtype: str = "float32",
     ) -> None:
         super().__init__()
-        assert n_mfcc <= n_mels, (
-            f'n_mfcc cannot be larger than n_mels: {n_mfcc} vs {n_mels}'
-        )
+        assert n_mfcc <= n_mels, f"n_mfcc cannot be larger than n_mels: {n_mfcc} vs {n_mels}"
         self._log_melspectrogram = LogMelSpectrogram(
             sr=sr,
             n_fft=n_fft,
@@ -433,7 +428,7 @@ class MFCC(nn.Layer):
             dtype=dtype,
         )
         self.dct_matrix = create_dct(n_mfcc=n_mfcc, n_mels=n_mels, dtype=dtype)
-        self.register_buffer('dct_matrix', self.dct_matrix)
+        self.register_buffer("dct_matrix", self.dct_matrix)
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -444,7 +439,9 @@ class MFCC(nn.Layer):
             Tensor: Mel frequency cepstral coefficients with shape `(N, n_mfcc, num_frames)`.
         """
         log_mel_feature = self._log_melspectrogram(x)
-        mfcc = paddle.matmul(
-            log_mel_feature.transpose((0, 2, 1)), self.dct_matrix
-        ).transpose((0, 2, 1))  # (B, n_mels, L)
+        mfcc = paddle.matmul(log_mel_feature.transpose((0, 2, 1)), self.dct_matrix).transpose((
+            0,
+            2,
+            1,
+        ))  # (B, n_mels, L)
         return mfcc

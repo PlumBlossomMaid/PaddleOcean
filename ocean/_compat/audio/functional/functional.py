@@ -65,13 +65,9 @@ def hz_to_mel(freq: _TensorOrFloat, htk: bool = False) -> _TensorOrFloat:
     logstep = math.log(6.4) / 27.0  # step size for log region
 
     if isinstance(freq, (Tensor, Variable, Value)):
-        target = (
-            min_log_mel + paddle.log(freq / min_log_hz + 1e-10) / logstep
-        )  # prevent nan with 1e-10
+        target = min_log_mel + paddle.log(freq / min_log_hz + 1e-10) / logstep  # prevent nan with 1e-10
         mask = (freq > min_log_hz).astype(freq.dtype)
-        mels = target * mask + mels * (
-            1 - mask
-        )  # will replace by masked_fill OP in future
+        mels = target * mask + mels * (1 - mask)  # will replace by masked_fill OP in future
     else:
         if freq >= min_log_hz:
             mels = min_log_mel + math.log(freq / min_log_hz + 1e-10) / logstep
@@ -111,9 +107,7 @@ def mel_to_hz(mel: _TensorOrFloat, htk: bool = False) -> _TensorOrFloat:
     if isinstance(mel, (Tensor, Variable, Value)):
         target = min_log_hz * paddle.exp(logstep * (mel - min_log_mel))
         mask = (mel > min_log_mel).astype(mel.dtype)
-        freqs = target * mask + freqs * (
-            1 - mask
-        )  # will replace by masked_fill OP in future
+        freqs = target * mask + freqs * (1 - mask)  # will replace by masked_fill OP in future
     else:
         if mel >= min_log_mel:
             freqs = min_log_hz * math.exp(logstep * (mel - min_log_mel))
@@ -125,7 +119,7 @@ def mel_frequencies(
     f_min: float = 0.0,
     f_max: float = 11025.0,
     htk: bool = False,
-    dtype: str = 'float32',
+    dtype: str = "float32",
 ) -> Tensor:
     """Compute mel frequencies.
 
@@ -159,7 +153,7 @@ def mel_frequencies(
     return freqs
 
 
-def fft_frequencies(sr: int, n_fft: int, dtype: str = 'float32') -> Tensor:
+def fft_frequencies(sr: int, n_fft: int, dtype: str = "float32") -> Tensor:
     """Compute fourier frequencies.
 
     Args:
@@ -189,8 +183,8 @@ def compute_fbank_matrix(
     f_min: float = 0.0,
     f_max: float | None = None,
     htk: bool = False,
-    norm: Literal['slaney'] | float = 'slaney',
-    dtype: str = 'float32',
+    norm: Literal["slaney"] | float = "slaney",
+    dtype: str = "float32",
 ) -> Tensor:
     """Compute fbank matrix.
 
@@ -227,9 +221,7 @@ def compute_fbank_matrix(
     fftfreqs = fft_frequencies(sr=sr, n_fft=n_fft, dtype=dtype)
 
     # 'Center freqs' of mel bands - uniformly spaced between limits
-    mel_f = mel_frequencies(
-        n_mels + 2, f_min=f_min, f_max=f_max, htk=htk, dtype=dtype
-    )
+    mel_f = mel_frequencies(n_mels + 2, f_min=f_min, f_max=f_max, htk=htk, dtype=dtype)
 
     fdiff = mel_f[1:] - mel_f[:-1]  # np.diff(mel_f)
     ramps = mel_f.unsqueeze(1) - fftfreqs.unsqueeze(0)
@@ -241,12 +233,10 @@ def compute_fbank_matrix(
         upper = ramps[i + 2] / fdiff[i + 1]
 
         # .. then intersect them with each other and zero
-        weights[i] = paddle.maximum(
-            paddle.zeros_like(lower), paddle.minimum(lower, upper)
-        )
+        weights[i] = paddle.maximum(paddle.zeros_like(lower), paddle.minimum(lower, upper))
 
     # Slaney-style mel is scaled to be approx constant energy per channel
-    if norm == 'slaney':
+    if norm == "slaney":
         enorm = 2.0 / (mel_f[2 : n_mels + 2] - mel_f[:n_mels])
         weights *= enorm.unsqueeze(1)
     elif isinstance(norm, (int, float)):
@@ -301,8 +291,8 @@ def power_to_db(
 def create_dct(
     n_mfcc: int,
     n_mels: int,
-    norm: Literal['ortho'] | None = 'ortho',
-    dtype: str = 'float32',
+    norm: Literal["ortho"] | None = "ortho",
+    dtype: str = "float32",
 ) -> Tensor:
     """Create a discrete cosine transform(DCT) matrix.
 
@@ -325,9 +315,7 @@ def create_dct(
     """
     n = paddle.arange(n_mels, dtype=dtype)
     k = paddle.arange(n_mfcc, dtype=dtype).unsqueeze(1)
-    dct = paddle.cos(
-        math.pi / float(n_mels) * (n + 0.5) * k
-    )  # size (n_mfcc, n_mels)
+    dct = paddle.cos(math.pi / float(n_mels) * (n + 0.5) * k)  # size (n_mfcc, n_mels)
     if norm is None:
         dct *= 2.0
     else:
@@ -343,9 +331,7 @@ def _get_sinc_resample_kernel(
     gcd: int,
     lowpass_filter_width: int = 6,
     rolloff: float = 0.99,
-    resampling_method: Literal[
-        "sinc_interp_hann", "sinc_interp_kaiser"
-    ] = "sinc_interp_hann",
+    resampling_method: Literal["sinc_interp_hann", "sinc_interp_kaiser"] = "sinc_interp_hann",
     beta: float | None = None,
     dtype: paddle.dtype | None = None,
 ):
@@ -408,15 +394,9 @@ def _get_sinc_resample_kernel(
     width = math.ceil(lowpass_filter_width * orig_freq / base_freq)
     idx_dtype = dtype if dtype is not None else paddle.float64
 
-    idx = (
-        paddle.arange(-width, width + orig_freq, dtype=idx_dtype)[None, None]
-        / orig_freq
-    )
+    idx = paddle.arange(-width, width + orig_freq, dtype=idx_dtype)[None, None] / orig_freq
 
-    t = (
-        paddle.arange(0, -new_freq, -1, dtype=dtype)[:, None, None] / new_freq
-        + idx
-    )
+    t = paddle.arange(0, -new_freq, -1, dtype=dtype)[:, None, None] / new_freq + idx
     t *= base_freq
     t = t.clip_(-lowpass_filter_width, lowpass_filter_width)
 
@@ -436,9 +416,7 @@ def _get_sinc_resample_kernel(
     t *= math.pi
 
     scale = base_freq / orig_freq
-    kernels = paddle.where(
-        t == 0, paddle.to_tensor(1.0).cast(t.dtype), t.sin() / t
-    )
+    kernels = paddle.where(t == 0, paddle.to_tensor(1.0).cast(t.dtype), t.sin() / t)
     kernels *= window * scale
 
     if dtype is None:  # pragma: no cover
@@ -484,13 +462,9 @@ def _apply_sinc_resample_kernel(
 
     num_wavs, length = waveform.shape
     waveform = paddle.nn.functional.pad(waveform, (width, width + orig_freq))
-    resampled = paddle.nn.functional.conv1d(
-        waveform[:, None], kernel, stride=orig_freq
-    )
+    resampled = paddle.nn.functional.conv1d(waveform[:, None], kernel, stride=orig_freq)
     resampled = resampled.transpose([0, 2, 1]).reshape((num_wavs, -1))
-    target_length = paddle.ceil(
-        paddle.to_tensor(new_freq * length / orig_freq)
-    ).astype(paddle.int64)
+    target_length = paddle.ceil(paddle.to_tensor(new_freq * length / orig_freq)).astype(paddle.int64)
     resampled = resampled[..., :target_length]
 
     # unpack batch
@@ -504,9 +478,7 @@ def resample(
     new_freq: int,
     lowpass_filter_width: int = 6,
     rolloff: float = 0.99,
-    resampling_method: Literal[
-        "sinc_interp_hann", "sinc_interp_kaiser"
-    ] = "sinc_interp_hann",
+    resampling_method: Literal["sinc_interp_hann", "sinc_interp_kaiser"] = "sinc_interp_hann",
     beta: float | None = None,
 ) -> Tensor:
     """
@@ -582,13 +554,9 @@ def resample(
             paddle.Size([4, 1, 500])
     """
     if orig_freq <= 0.0 or new_freq <= 0.0:
-        raise ValueError(
-            "Original frequency and desired frequency should be positive integers"
-        )
+        raise ValueError("Original frequency and desired frequency should be positive integers")
     if not waveform.is_floating_point():
-        raise TypeError(
-            f"Expected floating point type for waveform tensor, but received {waveform.dtype}."
-        )
+        raise TypeError(f"Expected floating point type for waveform tensor, but received {waveform.dtype}.")
 
     if orig_freq == new_freq:
         return waveform
@@ -605,7 +573,5 @@ def resample(
         beta,
         waveform.dtype,
     )
-    resampled = _apply_sinc_resample_kernel(
-        waveform, orig_freq, new_freq, gcd, kernel, width
-    )
+    resampled = _apply_sinc_resample_kernel(waveform, orig_freq, new_freq, gcd, kernel, width)
     return resampled

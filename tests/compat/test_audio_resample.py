@@ -18,9 +18,9 @@ from __future__ import annotations
 import itertools
 import unittest
 
+import paddle
 from parameterized import parameterized
 
-import paddle
 from ocean._compat import audio as compat_audio
 
 
@@ -31,9 +31,9 @@ def parameterize(*params):
 class TestAudioFunctions(unittest.TestCase):
     def setUp(self):
         paddle.disable_static()
-        self.initParams()
+        self.init_params()
 
-    def initParams(self):
+    def init_params(self):
         def get_wav_data(dtype: str, num_channels: int, num_frames: int):
             dtype_ = getattr(paddle, dtype)
             base = paddle.linspace(-1.0, 1.0, num_frames, dtype=dtype_) * 0.1
@@ -45,8 +45,8 @@ class TestAudioFunctions(unittest.TestCase):
         self.n_mels = 40
         self.n_mfcc = 20
         self.fmin = 0.0
-        self.window_str = 'hann'
-        self.pad_mode = 'reflect'
+        self.window_str = "hann"
+        self.pad_mode = "reflect"
         self.top_db = 80.0
         self.duration = 0.5
         self.num_channels = 1
@@ -119,9 +119,7 @@ class TestAudioFunctions(unittest.TestCase):
             raise NotImplementedError(f"dtype {dtype} is not supported.")
 
         paddle.seed(seed)
-        tensor = paddle.randn(
-            [n_channels, int(sample_rate * duration)], dtype=paddle.float32
-        )
+        tensor = paddle.randn([n_channels, int(sample_rate * duration)], dtype=paddle.float32)
         tensor /= 2.0
         tensor *= scale_factor
         tensor.clip_(-1.0, 1.0)
@@ -153,9 +151,7 @@ class TestAudioFunctions(unittest.TestCase):
             sample_rate=sr,
             duration=0.5,
         )
-        downsampled = compat_audio.functional.resample(
-            waveform, sr, sr // 2, resampling_method=resampling_method
-        )
+        downsampled = compat_audio.functional.resample(waveform, sr, sr // 2, resampling_method=resampling_method)
         assert downsampled.shape[-1] == waveform.shape[-1] // 2
 
     @parameterize([("sinc_interp_hann"), ("sinc_interp_kaiser")])
@@ -165,9 +161,7 @@ class TestAudioFunctions(unittest.TestCase):
             sample_rate=sr,
             duration=0.5,
         )
-        downsampled = compat_audio.functional.resample(
-            waveform, sr, sr * 2, resampling_method=resampling_method
-        )
+        downsampled = compat_audio.functional.resample(waveform, sr, sr * 2, resampling_method=resampling_method)
         assert downsampled.shape[-1] == waveform.shape[-1] * 2
 
     @parameterize([("sinc_interp_hann"), ("sinc_interp_kaiser")])
@@ -177,17 +171,13 @@ class TestAudioFunctions(unittest.TestCase):
             sample_rate=sr,
             duration=0.5,
         )
-        resampled = compat_audio.functional.resample(
-            waveform, sr, sr, resampling_method=resampling_method
-        )
+        resampled = compat_audio.functional.resample(waveform, sr, sr, resampling_method=resampling_method)
         assert resampled.shape[-1] == waveform.shape[-1]
 
     @parameterize([0, -8000, 114.514])
     def test_resample_exceptions_sr_no_positive(self, sample_rate):
 
-        waveform = self.get_whitenoise(
-            sample_rate=16000, duration=0.5
-        )  # shape: [1, 8000]
+        waveform = self.get_whitenoise(sample_rate=16000, duration=0.5)  # shape: [1, 8000]
 
         with self.assertRaises(ValueError) as context:
             compat_audio.functional.resample(waveform, 16000, sample_rate)
@@ -199,53 +189,33 @@ class TestAudioFunctions(unittest.TestCase):
     @parameterize([8000])
     def test_resample_exceptions_data_no_float(self, sample_rate):
 
-        waveform = self.get_whitenoise(
-            sample_rate=sample_rate, duration=0.5
-        )  # shape: [1, 8000]
+        waveform = self.get_whitenoise(sample_rate=sample_rate, duration=0.5)  # shape: [1, 8000]
 
         waveform_int = waveform.astype(paddle.int16)
         with self.assertRaises(TypeError) as context:
-            compat_audio.functional.resample(
-                waveform_int, sample_rate, sample_rate // 2
-            )
+            compat_audio.functional.resample(waveform_int, sample_rate, sample_rate // 2)
         self.assertIn("floating point", str(context.exception))
 
     @parameterize(["invalid_method", "invalid_method2"])
     def test_resample_exceptions_invalid_method(self, resampling_method):
 
-        waveform = self.get_whitenoise(
-            sample_rate=16000, duration=0.5
-        )  # shape: [1, 8000]
+        waveform = self.get_whitenoise(sample_rate=16000, duration=0.5)  # shape: [1, 8000]
 
         with self.assertRaises(ValueError) as context:
-            compat_audio.functional.resample(
-                waveform, 16000, 8000, resampling_method=resampling_method
-            )
+            compat_audio.functional.resample(waveform, 16000, 8000, resampling_method=resampling_method)
         self.assertIn("Invalid resampling method", str(context.exception))
 
     @parameterize([0, -5])
-    def test_resample_exceptions_filter_width_not_positive(
-        self, lowpass_filter_width
-    ):
-        waveform = self.get_whitenoise(
-            sample_rate=16000, duration=0.5
-        )  # shape: [1, 8000]
+    def test_resample_exceptions_filter_width_not_positive(self, lowpass_filter_width):
+        waveform = self.get_whitenoise(sample_rate=16000, duration=0.5)  # shape: [1, 8000]
         with self.assertRaises(ValueError) as context:
-            compat_audio.functional.resample(
-                waveform, 16000, 8000, lowpass_filter_width=lowpass_filter_width
-            )
-        self.assertIn(
-            "Low pass filter width should be positive", str(context.exception)
-        )
+            compat_audio.functional.resample(waveform, 16000, 8000, lowpass_filter_width=lowpass_filter_width)
+        self.assertIn("Low pass filter width should be positive", str(context.exception))
 
         with self.assertRaises(ValueError) as context:
-            compat_audio.functional.resample(
-                waveform, 16000, 8000, lowpass_filter_width=lowpass_filter_width
-            )
-        self.assertIn(
-            "Low pass filter width should be positive", str(context.exception)
-        )
+            compat_audio.functional.resample(waveform, 16000, 8000, lowpass_filter_width=lowpass_filter_width)
+        self.assertIn("Low pass filter width should be positive", str(context.exception))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

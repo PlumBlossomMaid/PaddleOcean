@@ -15,6 +15,7 @@
 import unittest
 
 import paddle
+
 from ocean._compat.audio.functional.window import get_window
 
 
@@ -23,133 +24,133 @@ class TestWindowFunctions(unittest.TestCase):
         paddle.set_device("cpu")
 
     def test_hamming_alpha_beta_transform_and_requires_grad(self):
-        N = 16
-        w0 = get_window('hamming', N, fftbins=True, dtype='float64')
+        n = 16
+        w0 = get_window("hamming", n, fftbins=True, dtype="float64")
 
-        # Custom alpha/beta, verify linear transformation A + B * w0
+        # Custom alpha/beta, verify linear transformation a + b * w0
         alpha, beta = 0.60, 0.40
         w = paddle.hamming_window(
-            N,
+            n,
             periodic=True,
             alpha=alpha,
             beta=beta,
-            dtype='float64',
+            dtype="float64",
             requires_grad=True,
         )
         self.assertEqual(w.dtype, paddle.float64)
         self.assertFalse(w.stop_gradient)
-        # Linear equivalence: w ≈ A + B * w0
+        # Linear equivalence: w ≈ a + b * w0
         alpha0, beta0 = 0.54, 0.46
-        B = beta / beta0
-        A = alpha - B * alpha0
-        self.assertTrue(paddle.allclose(w, A + B * w0, atol=1e-12))
+        b = beta / beta0
+        a = alpha - b * alpha0
+        self.assertTrue(paddle.allclose(w, a + b * w0, atol=1e-12))
 
     def test_hamming_layout_warning(self):
-        N = 8
+        n = 8
         # Pass layout != None to trigger warning branch (ignored)
         w = paddle.hamming_window(
-            N,
+            n,
             periodic=False,
             alpha=0.54,
             beta=0.46,
-            dtype='float32',
-            layout='strided',
-            device='cpu',
+            dtype="float32",
+            layout="strided",
+            device="cpu",
             requires_grad=False,
         )
         self.assertEqual(w.dtype, paddle.float32)
         self.assertTrue(w.stop_gradient)
-        self.assertEqual(list(w.shape), [N])
+        self.assertEqual(list(w.shape), [n])
 
     def test_hamming_device_gpu_pin_memory(self):
         if paddle.is_compiled_with_cuda():
-            N = 12
+            n = 12
             # Explicitly set device to cuda:0 / gpu:0 should work (PlaceLike supports str)
             w = paddle.hamming_window(
-                N,
+                n,
                 periodic=True,
                 alpha=0.54,
                 beta=0.46,
-                dtype='float32',
+                dtype="float32",
                 layout=None,
-                device='gpu:0',
+                device="gpu:0",
                 pin_memory=True,
                 requires_grad=None,
             )
-            self.assertEqual(list(w.shape), [N])
-            self.assertIn('gpu', str(w.place))
+            self.assertEqual(list(w.shape), [n])
+            self.assertIn("gpu", str(w.place))
 
     def test_hann_basic_paths(self):
-        N = 10
+        n = 10
         # Pass layout=None; set requires_grad=True
         w = paddle.hann_window(
-            N,
+            n,
             periodic=True,
-            dtype='float64',
+            dtype="float64",
             layout=None,
-            device='cpu',
+            device="cpu",
             requires_grad=True,
         )
-        self.assertEqual(list(w.shape), [N])
+        self.assertEqual(list(w.shape), [n])
         self.assertFalse(w.stop_gradient)
 
         # Test layout != None
         w2 = paddle.hann_window(
-            N,
+            n,
             periodic=False,
-            dtype='float32',
-            layout='strided',
-            device='cpu',
+            dtype="float32",
+            layout="strided",
+            device="cpu",
             requires_grad=False,
         )
         self.assertEqual(w2.dtype, paddle.float32)
         self.assertTrue(w2.stop_gradient)
 
     def test_blackman_and_bartlett_basic(self):
-        N = 9
+        n = 9
         wb = paddle.blackman_window(
-            N,
+            n,
             periodic=True,
-            dtype='float64',
+            dtype="float64",
             layout=None,
             device=None,
             requires_grad=None,
         )
-        self.assertEqual(list(wb.shape), [N])
+        self.assertEqual(list(wb.shape), [n])
 
         wl = paddle.bartlett_window(
-            N,
+            n,
             periodic=False,
-            dtype='float32',
-            layout='strided',
-            device='cpu',
+            dtype="float32",
+            layout="strided",
+            device="cpu",
             requires_grad=True,
         )
-        self.assertEqual(list(wl.shape), [N])
+        self.assertEqual(list(wl.shape), [n])
         self.assertFalse(wl.stop_gradient)
 
     def test_kaiser_beta_and_paths(self):
-        N = 7
+        n = 7
         beta = 6.0
         w = paddle.kaiser_window(
-            N,
+            n,
             periodic=True,
             beta=beta,
-            dtype='float64',
+            dtype="float64",
             layout=None,
             device=None,
             requires_grad=None,
         )
-        self.assertEqual(list(w.shape), [N])
+        self.assertEqual(list(w.shape), [n])
 
         # Test layout != None + requires_grad
         w2 = paddle.kaiser_window(
-            N,
+            n,
             periodic=False,
             beta=8.0,
-            dtype='float32',
-            layout='strided',
-            device='cpu',
+            dtype="float32",
+            layout="strided",
+            device="cpu",
             requires_grad=False,
         )
         self.assertEqual(w2.dtype, paddle.float32)
@@ -157,16 +158,12 @@ class TestWindowFunctions(unittest.TestCase):
 
     def test_hamming_periodic_vs_symmetric(self):
         # Test periodic True/False length handling (DFT symmetry/periodic)
-        N = 11
-        w_per = paddle.hamming_window(
-            N, periodic=True, alpha=0.54, beta=0.46, dtype='float64'
-        )
-        w_sym = paddle.hamming_window(
-            N, periodic=False, alpha=0.54, beta=0.46, dtype='float64'
-        )
-        self.assertEqual(list(w_per.shape), [N])
-        self.assertEqual(list(w_sym.shape), [N])
+        n = 11
+        w_per = paddle.hamming_window(n, periodic=True, alpha=0.54, beta=0.46, dtype="float64")
+        w_sym = paddle.hamming_window(n, periodic=False, alpha=0.54, beta=0.46, dtype="float64")
+        self.assertEqual(list(w_per.shape), [n])
+        self.assertEqual(list(w_sym.shape), [n])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

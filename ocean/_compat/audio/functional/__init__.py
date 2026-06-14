@@ -24,13 +24,13 @@ from .functional import (
 from .window import get_window
 
 __all__ = [
-    'compute_fbank_matrix',
-    'create_dct',
-    'fft_frequencies',
-    'hz_to_mel',
-    'mel_frequencies',
-    'mel_to_hz',
-    'power_to_db',
-    'get_window',
-    'resample',
+    "compute_fbank_matrix",
+    "create_dct",
+    "fft_frequencies",
+    "hz_to_mel",
+    "mel_frequencies",
+    "mel_to_hz",
+    "power_to_db",
+    "get_window",
+    "resample",
 ]

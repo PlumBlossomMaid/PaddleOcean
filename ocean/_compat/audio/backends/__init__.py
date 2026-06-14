@@ -21,7 +21,7 @@ from .init_backend import (
 init_backend._init_set_audio_backend()
 
 __all__ = [
-    'get_current_backend',
-    'list_available_backends',
-    'set_backend',
+    "get_current_backend",
+    "list_available_backends",
+    "set_backend",
 ]

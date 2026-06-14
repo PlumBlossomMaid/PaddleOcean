@@ -19,8 +19,8 @@ from .layers import (
 )
 
 __all__ = [
-    'LogMelSpectrogram',
-    'MelSpectrogram',
-    'MFCC',
-    'Spectrogram',
+    "LogMelSpectrogram",
+    "MelSpectrogram",
+    "MFCC",
+    "Spectrogram",
 ]

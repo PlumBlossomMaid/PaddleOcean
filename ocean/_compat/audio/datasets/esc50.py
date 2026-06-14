@@ -16,24 +16,23 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
-from typing_extensions import TypeAlias
-
 from paddle.dataset.common import DATA_HOME
 from paddle.utils import download
+from typing_extensions import TypeAlias
 
 from .dataset import AudioClassificationDataset
 
 if TYPE_CHECKING:
     _ModeLiteral: TypeAlias = Literal[
-        'train',
-        'dev',
+        "train",
+        "dev",
     ]
     _FeatTypeLiteral: TypeAlias = Literal[
-        'raw',
-        'melspectrogram',
-        'mfcc',
-        'logmelspectrogram',
-        'spectrogram',
+        "raw",
+        "melspectrogram",
+        "mfcc",
+        "logmelspectrogram",
+        "spectrogram",
     ]
 
 
@@ -102,71 +101,71 @@ class ESC50(AudioClassificationDataset):
     """
 
     archive: dict[str, str] = {
-        'url': 'https://paddleaudio.bj.bcebos.com/datasets/ESC-50-master.zip',
-        'md5': '7771e4b9d86d0945acce719c7a59305a',
+        "url": "https://paddleaudio.bj.bcebos.com/datasets/ESC-50-master.zip",
+        "md5": "7771e4b9d86d0945acce719c7a59305a",
     }
 
     label_list: list[str] = [
         # Animals
-        'Dog',
-        'Rooster',
-        'Pig',
-        'Cow',
-        'Frog',
-        'Cat',
-        'Hen',
-        'Insects (flying)',
-        'Sheep',
-        'Crow',
+        "Dog",
+        "Rooster",
+        "Pig",
+        "Cow",
+        "Frog",
+        "Cat",
+        "Hen",
+        "Insects (flying)",
+        "Sheep",
+        "Crow",
         # Natural soundscapes & water sounds
-        'Rain',
-        'Sea waves',
-        'Crackling fire',
-        'Crickets',
-        'Chirping birds',
-        'Water drops',
-        'Wind',
-        'Pouring water',
-        'Toilet flush',
-        'Thunderstorm',
+        "Rain",
+        "Sea waves",
+        "Crackling fire",
+        "Crickets",
+        "Chirping birds",
+        "Water drops",
+        "Wind",
+        "Pouring water",
+        "Toilet flush",
+        "Thunderstorm",
         # Human, non-speech sounds
-        'Crying baby',
-        'Sneezing',
-        'Clapping',
-        'Breathing',
-        'Coughing',
-        'Footsteps',
-        'Laughing',
-        'Brushing teeth',
-        'Snoring',
-        'Drinking, sipping',
+        "Crying baby",
+        "Sneezing",
+        "Clapping",
+        "Breathing",
+        "Coughing",
+        "Footsteps",
+        "Laughing",
+        "Brushing teeth",
+        "Snoring",
+        "Drinking, sipping",
         # Interior/domestic sounds
-        'Door knock',
-        'Mouse click',
-        'Keyboard typing',
-        'Door, wood creaks',
-        'Can opening',
-        'Washing machine',
-        'Vacuum cleaner',
-        'Clock alarm',
-        'Clock tick',
-        'Glass breaking',
+        "Door knock",
+        "Mouse click",
+        "Keyboard typing",
+        "Door, wood creaks",
+        "Can opening",
+        "Washing machine",
+        "Vacuum cleaner",
+        "Clock alarm",
+        "Clock tick",
+        "Glass breaking",
         # Exterior/urban noises
-        'Helicopter',
-        'Chainsaw',
-        'Siren',
-        'Car horn',
-        'Engine',
-        'Train',
-        'Church bells',
-        'Airplane',
-        'Fireworks',
-        'Hand saw',
+        "Helicopter",
+        "Chainsaw",
+        "Siren",
+        "Car horn",
+        "Engine",
+        "Train",
+        "Church bells",
+        "Airplane",
+        "Fireworks",
+        "Hand saw",
     ]
-    meta: str = os.path.join('ESC-50-master', 'meta', 'esc50.csv')
-    audio_path: str = os.path.join('ESC-50-master', 'audio')
+    meta: str = os.path.join("ESC-50-master", "meta", "esc50.csv")
+    audio_path: str = os.path.join("ESC-50-master", "audio")
 
-    class meta_info(NamedTuple):
+    class MetaInfo(NamedTuple):
         filename: str
         fold: str
         target: str
@@ -177,39 +176,33 @@ class ESC50(AudioClassificationDataset):
 
     def __init__(
         self,
-        mode: _ModeLiteral = 'train',
+        mode: _ModeLiteral = "train",
         split: int = 1,
-        feat_type: _FeatTypeLiteral = 'raw',
+        feat_type: _FeatTypeLiteral = "raw",
         archive: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
-        assert split in range(1, 6), (
-            f'The selected split should be integer, and 1 <= split <= 5, but got {split}'
-        )
+        assert split in range(1, 6), f"The selected split should be integer, and 1 <= split <= 5, but got {split}"
         if archive is not None:
             self.archive = archive
         files, labels = self._get_data(mode, split)
-        super().__init__(
-            files=files, labels=labels, feat_type=feat_type, **kwargs
-        )
+        super().__init__(files=files, labels=labels, feat_type=feat_type, **kwargs)
 
-    def _get_meta_info(self) -> list[meta_info]:
+    def _get_meta_info(self) -> list[MetaInfo]:
         ret = []
-        with open(os.path.join(DATA_HOME, self.meta), 'r') as rf:
+        with open(os.path.join(DATA_HOME, self.meta), "r") as rf:
             for line in rf.readlines()[1:]:
-                ret.append(self.meta_info(*line.strip().split(',')))
+                ret.append(self.MetaInfo(*line.strip().split(",")))
         return ret
 
-    def _get_data(
-        self, mode: _ModeLiteral, split: int
-    ) -> tuple[list[str], list[int]]:
-        if not os.path.isdir(
-            os.path.join(DATA_HOME, self.audio_path)
-        ) or not os.path.isfile(os.path.join(DATA_HOME, self.meta)):
+    def _get_data(self, mode: _ModeLiteral, split: int) -> tuple[list[str], list[int]]:
+        if not os.path.isdir(os.path.join(DATA_HOME, self.audio_path)) or not os.path.isfile(
+            os.path.join(DATA_HOME, self.meta)
+        ):
             download.get_path_from_url(
-                self.archive['url'],
+                self.archive["url"],
                 DATA_HOME,
-                self.archive['md5'],
+                self.archive["md5"],
                 decompress=True,
             )
 
@@ -219,11 +212,11 @@ class ESC50(AudioClassificationDataset):
         labels = []
         for sample in meta_info:
             filename, fold, target, _, _, _, _ = sample
-            if mode == 'train' and int(fold) != split:
+            if mode == "train" and int(fold) != split:
                 files.append(os.path.join(DATA_HOME, self.audio_path, filename))
                 labels.append(int(target))
 
-            if mode != 'train' and int(fold) == split:
+            if mode != "train" and int(fold) == split:
                 files.append(os.path.join(DATA_HOME, self.audio_path, filename))
                 labels.append(int(target))
 

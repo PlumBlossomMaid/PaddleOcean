@@ -80,71 +80,67 @@ class TESS(AudioClassificationDataset):
     """
 
     archive: dict[str, str] = {
-        'url': 'https://bj.bcebos.com/paddleaudio/datasets/TESS_Toronto_emotional_speech_set.zip',
-        'md5': '1465311b24d1de704c4c63e4ccc470c7',
+        "url": "https://bj.bcebos.com/paddleaudio/datasets/TESS_Toronto_emotional_speech_set.zip",
+        "md5": "1465311b24d1de704c4c63e4ccc470c7",
     }
 
     label_list: list[str] = [
-        'angry',
-        'disgust',
-        'fear',
-        'happy',
-        'neutral',
-        'ps',  # pleasant surprise
-        'sad',
+        "angry",
+        "disgust",
+        "fear",
+        "happy",
+        "neutral",
+        "ps",  # pleasant surprise
+        "sad",
     ]
 
-    audio_path: str = 'TESS_Toronto_emotional_speech_set'
+    audio_path: str = "TESS_Toronto_emotional_speech_set"
 
-    class meta_info(NamedTuple):
+    class MetaInfo(NamedTuple):
         speaker: str
         word: str
         emotion: str
 
     def __init__(
         self,
-        mode: _ModeLiteral = 'train',
+        mode: _ModeLiteral = "train",
         n_folds: int = 5,
         split: int = 1,
-        feat_type: _FeatTypeLiteral = 'raw',
+        feat_type: _FeatTypeLiteral = "raw",
         archive: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         assert isinstance(n_folds, int) and (n_folds >= 1), (
-            f'the n_folds should be integer and n_folds >= 1, but got {n_folds}'
+            f"the n_folds should be integer and n_folds >= 1, but got {n_folds}"
         )
         assert split in range(1, n_folds + 1), (
-            f'The selected split should be integer and should be 1 <= split <= {n_folds}, but got {split}'
+            f"The selected split should be integer and should be 1 <= split <= {n_folds}, but got {split}"
         )
         if archive is not None:
             self.archive = archive
         files, labels = self._get_data(mode, n_folds, split)
-        super().__init__(
-            files=files, labels=labels, feat_type=feat_type, **kwargs
-        )
+        super().__init__(files=files, labels=labels, feat_type=feat_type, **kwargs)
 
-    def _get_meta_info(self, files) -> list[meta_info]:
+    def _get_meta_info(self, files) -> list[MetaInfo]:
         ret = []
         for file in files:
             basename_without_extend = os.path.basename(file)[:-4]
-            ret.append(self.meta_info(*basename_without_extend.split('_')))
+            ret.append(self.MetaInfo(*basename_without_extend.split("_")))
         return ret
 
-    def _get_data(
-        self, mode: str, n_folds: int, split: int
-    ) -> tuple[list[str], list[int]]:
+    def _get_data(self, mode: str, n_folds: int, split: int) -> tuple[list[str], list[int]]:
         if not os.path.isdir(os.path.join(DATA_HOME, self.audio_path)):
             download.get_path_from_url(
-                self.archive['url'],
+                self.archive["url"],
                 DATA_HOME,
-                self.archive['md5'],
+                self.archive["md5"],
                 decompress=True,
             )
 
         wav_files = []
         for root, _, files in os.walk(os.path.join(DATA_HOME, self.audio_path)):
             for file in files:
-                if file.endswith('.wav'):
+                if file.endswith(".wav"):
                     wav_files.append(os.path.join(root, file))
 
         meta_info = self._get_meta_info(wav_files)
@@ -156,11 +152,11 @@ class TESS(AudioClassificationDataset):
             target = self.label_list.index(emotion)
             fold = idx % n_folds + 1
 
-            if mode == 'train' and int(fold) != split:
+            if mode == "train" and int(fold) != split:
                 files.append(wav_files[idx])
                 labels.append(target)
 
-            if mode != 'train' and int(fold) == split:
+            if mode != "train" and int(fold) == split:
                 files.append(wav_files[idx])
                 labels.append(target)
 

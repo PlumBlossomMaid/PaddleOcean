@@ -18,7 +18,6 @@ import wave
 from typing import TYPE_CHECKING, BinaryIO
 
 import numpy as np
-
 import paddle
 
 from .backend import AudioInfo
@@ -68,10 +67,10 @@ def info(filepath: str | BinaryIO) -> AudioInfo:
             >>> wav_info = paddle.audio.info(filepath)
     """
 
-    if hasattr(filepath, 'read'):
+    if hasattr(filepath, "read"):
         file_obj = filepath
     else:
-        file_obj = open(filepath, 'rb')
+        file_obj = open(filepath, "rb")
 
     try:
         file_ = wave.open(file_obj)
@@ -87,9 +86,7 @@ def info(filepath: str | BinaryIO) -> AudioInfo:
     bits_per_sample = file_.getsampwidth() * 8
     encoding = "PCM_S"  # default WAV encoding, only support
     file_obj.close()
-    return AudioInfo(
-        sample_rate, sample_frames, channels, bits_per_sample, encoding
-    )
+    return AudioInfo(sample_rate, sample_frames, channels, bits_per_sample, encoding)
 
 
 def load(
@@ -132,10 +129,10 @@ def load(
             >>> paddle.audio.save(filepath, waveform, sample_rate)
             >>> wav_data_read, sr = paddle.audio.load(filepath)
     """
-    if hasattr(filepath, 'read'):
+    if hasattr(filepath, "read"):
         file_obj = filepath
     else:
-        file_obj = open(filepath, 'rb')
+        file_obj = open(filepath, "rb")
 
     try:
         file_ = wave.open(file_obj)
@@ -229,7 +226,7 @@ def save(
     if src.dtype == paddle.float32:
         audio_numpy = (audio_numpy * (2**15)).astype("<h")
 
-    with wave.open(filepath, 'w') as f:
+    with wave.open(filepath, "w") as f:
         f.setnchannels(channels)
         f.setsampwidth(sample_width)
         f.setframerate(sample_rate)

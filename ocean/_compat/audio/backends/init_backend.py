@@ -24,7 +24,7 @@ from . import backend, wave_backend
 
 def _check_version(version: str) -> bool:
     # require paddleaudio >= 1.0.2
-    ver_arr = version.split('.')
+    ver_arr = version.split(".")
     v0 = int(ver_arr[0])
     v1 = int(ver_arr[1])
     v2 = int(ver_arr[2])
@@ -82,10 +82,7 @@ def list_available_backends() -> list[str]:
     if "paddleaudio" in sys.modules:
         version = paddleaudio.__version__
         if not _check_version(version):
-            err_msg = (
-                f"the version of paddleaudio installed is {version},\n"
-                "please ensure the paddleaudio >= 1.0.2."
-            )
+            err_msg = f"the version of paddleaudio installed is {version},\nplease ensure the paddleaudio >= 1.0.2."
             raise ImportError(err_msg)
         backends = paddleaudio.backends.list_audio_backends()
     backends.append("wave_backend")
