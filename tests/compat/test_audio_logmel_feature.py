@@ -60,7 +60,7 @@ class TestAudioComponents(unittest.TestCase):
         wav = self.waveform
 
         # librosa STFT -> magnitude
-        D_lib = np.abs(
+        d_lib = np.abs(
             librosa.stft(
                 wav,
                 n_fft=n_fft,
@@ -77,13 +77,13 @@ class TestAudioComponents(unittest.TestCase):
 
         win_tensor = paddle.to_tensor(ss.get_window(window_str, n_fft, fftbins=True).astype(np.float64))
         x = paddle.to_tensor(wav, dtype=paddle.float64)
-        X_pd = paddle.signal.stft(
+        x_pd = paddle.signal.stft(
             x, n_fft=n_fft, hop_length=hop_length, win_length=n_fft, window=win_tensor, center=True, pad_mode="reflect"
         )
-        D_pd = paddle.abs(X_pd).numpy()
+        d_pd = paddle.abs(x_pd).numpy()
 
         np.testing.assert_array_almost_equal(
-            D_lib, D_pd, decimal=3, err_msg=f"STFT magnitude mismatch: n_fft={n_fft}, hop={hop_length}"
+            d_lib, d_pd, decimal=3, err_msg=f"STFT magnitude mismatch: n_fft={n_fft}, hop={hop_length}"
         )
 
     # ── Power spectrogram ──────────────────────────────────────────────
