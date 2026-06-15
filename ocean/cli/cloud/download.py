@@ -7,21 +7,21 @@ Usage:
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
 import click
 import requests
-from tqdm import tqdm
 
 from ocean.cli.cloud import _config
 from ocean.cli.cloud.auth import get_token
-from ocean.cli.cloud.upload import _header_fill
+from ocean.cli.cloud.upload import ColoredTqdm, _git_api, _header_fill
 
 
 def _download_file(url: str, dest: str, token: str, desc: str = ""):
-    """Download a single file with progress bar."""
+    """Download a single file with rainbow progress bar."""
     headers = {
         "Authorization": f"token {token}",
         "SDK-Version": "ocean-0.1",
@@ -30,22 +30,77 @@ def _download_file(url: str, dest: str, token: str, desc: str = ""):
     resp.raise_for_status()
 
     total = int(resp.headers.get("content-length", 0))
-    with open(dest, "wb") as f:
-        pbar = tqdm(total=total, unit="B", unit_scale=True, desc=desc or Path(dest).name) if total and desc else None
-        for chunk in resp.iter_content(chunk_size=1024 * 1024):
-            f.write(chunk)
-            if pbar:
+    dest_path = Path(dest)
+    with open(dest_path, "wb") as f:
+        with ColoredTqdm(
+            total=total,
+            unit="B",
+            unit_scale=True,
+            desc=desc or dest_path.name,
+            leave=False,
+        ) as pbar:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                f.write(chunk)
                 pbar.update(len(chunk))
-        if pbar:
-            pbar.close()
     return dest
 
 
+def _lfs_download_real(repo_id: str, oid: str, file_size: int, token: str, dest: str, desc: str = "") -> None:
+    """Download real LFS content from BOS via LFS batch API."""
+    user_name, repo_name = repo_id.split("/")
+
+    # Step 1: LFS batch API → get download URL
+    resp = _git_api(
+        "POST",
+        f"/{user_name}/{repo_name}.git/info/lfs/objects/batch",
+        token,
+        data={
+            "operation": "download",
+            "objects": [{"oid": oid, "size": file_size}],
+            "transfers": ["lfs-standalone-file", "basic"],
+            "ref": {"name": "refs/heads/master"},
+            "hash_algo": "sha256",
+        },
+        content_type="application/vnd.git-lfs+json",
+    )
+
+    if not resp.get("objects"):
+        raise click.ClickException(f"{desc}: no LFS object found for {oid}")
+
+    obj = resp["objects"][0]
+    if "error" in obj:
+        raise click.ClickException(f"{desc}: LFS error: {obj['error']}")
+
+    actions = obj.get("actions", {})
+    download_info = actions.get("download", {})
+    download_href = download_info.get("href", "")
+    if not download_href:
+        raise click.ClickException(f"{desc}: no download URL available")
+
+    # Step 2: Download from BOS
+    click.echo(f"  ☁️  {desc} ({file_size / 1024 / 1024:.1f} MB)")
+    resp = requests.get(download_href, stream=True, timeout=7200)
+    resp.raise_for_status()
+
+    with open(dest, "wb") as f:
+        with ColoredTqdm(
+            total=file_size,
+            unit="B",
+            unit_scale=True,
+            desc=desc,
+            leave=False,
+        ) as pbar:
+            for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+
+
 def _download_with_lfs_check(repo_id: str, file_info: dict, dest: str, token: str, revision: str = "master"):
-    """Download a file, using the Gitea media API for LFS objects."""
+    """Download a file, handling LFS objects properly."""
     name = file_info["name"]
 
-    # Use the media API endpoint (handles LFS content transparently)
+    # First try the media API (handles LFS content transparently)
     user_name, repo_name = repo_id.split("/")
     git_host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
     url = (
@@ -55,6 +110,23 @@ def _download_with_lfs_check(repo_id: str, file_info: dict, dest: str, token: st
         url += f"?ref={quote(revision, safe='')}"
 
     _download_file(url, dest, token, desc=name)
+
+    # Check if the downloaded file is actually an LFS pointer
+    dest_path = Path(dest)
+    if dest_path.stat().st_size < 500:
+        with open(dest_path, "r") as f:
+            first_line = f.readline().strip()
+        if first_line == "version https://git-lfs.github.com/spec/v1":
+            # Parse OID and download real content
+            content = dest_path.read_text()
+            oid_match = re.search(r"oid sha256:([a-f0-9]{64})", content)
+            size_match = re.search(r"size (\d+)", content)
+            if oid_match and size_match:
+                oid = oid_match.group(1)
+                file_size = int(size_match.group(1))
+                _lfs_download_real(repo_id, oid, file_size, token, dest, desc=name)
+            # Remove the temporary pointer file if LFS download succeeded
+            # (_lfs_download_real already wrote the real content to dest)
 
 
 @click.command()
