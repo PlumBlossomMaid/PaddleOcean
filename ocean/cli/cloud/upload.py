@@ -1,4 +1,12 @@
-"""cloud upload — upload files to AI Studio."""
+"""cloud upload — upload files to AI Studio.
+
+Public API:
+    >>> from ocean.cloud import upload_file, upload_folder
+    >>> upload_file("user/repo", "/path/to/file.zip", repo_type="dataset")
+
+CLI:
+    ocean cloud upload user/repo /path/to/file.zip
+"""
 
 import base64
 import hashlib
@@ -286,10 +294,84 @@ def upload(
 
         ocean cloud upload PlumBlossom/MyModel ./checkpoints/ --repo-type model
     """
+    upload_folder(
+        repo_id=repo_id,
+        local_path=local_path,
+        path_in_repo=path_in_repo,
+        repo_type=repo_type,
+        revision=revision,
+        token=token or get_token(),
+        max_workers=max_workers,
+        commit_message=commit_message,
+    )
+
+
+# ── Public Python API ────────────────────────────────────────────────
+
+
+def upload_file(
+    repo_id: str,
+    local_path: str,
+    path_in_repo: Optional[str] = None,
+    repo_type: str = "dataset",
+    revision: str = "master",
+    token: Optional[str] = None,
+    commit_message: Optional[str] = None,
+) -> None:
+    """Upload a single file to AI Studio.
+
+    Args:
+        repo_id: ``username/repo-name``.
+        local_path: Path to the local file.
+        path_in_repo: Target path in the repo (defaults to filename).
+        repo_type: ``"dataset"`` or ``"model"``.
+        revision: Branch name.
+        token: AI Studio access token. Falls back to env/login.
+        commit_message: Optional commit message.
+
+    Examples:
+        >>> upload_file("PlumBlossom/MyData", "./17LiYuan.zip", repo_type="dataset")
+    """
+    upload_folder(
+        repo_id=repo_id,
+        local_path=local_path,
+        path_in_repo=path_in_repo,
+        repo_type=repo_type,
+        revision=revision,
+        token=token,
+        max_workers=1,
+        commit_message=commit_message,
+    )
+
+
+def upload_folder(
+    repo_id: str,
+    local_path: str,
+    path_in_repo: Optional[str] = None,
+    repo_type: str = "dataset",
+    revision: str = "master",
+    token: Optional[str] = None,
+    max_workers: int = 4,
+    commit_message: Optional[str] = None,
+) -> None:
+    """Upload a file or folder to AI Studio.
+
+    Args:
+        repo_id: ``username/repo-name``.
+        local_path: Path to local file or directory.
+        path_in_repo: Target path in the repo.
+        repo_type: ``"dataset"`` or ``"model"``.
+        revision: Branch name.
+        token: AI Studio access token. Falls back to env/login.
+        max_workers: Parallel upload threads.
+        commit_message: Optional commit message.
+
+    Examples:
+        >>> upload_folder("PlumBlossom/MyData", "./data_dir/")
+    """
     token = token or get_token()
     _config.validate_repo_id(repo_id)
 
-    # Determine path_in_repo
     p = Path(local_path)
     if p.is_file():
         items = [(path_in_repo or p.name, str(p))]
@@ -302,18 +384,17 @@ def upload(
                 rel = f.relative_to(p).as_posix()
                 items.append((prefix + rel, str(f)))
 
-    click.echo(f"📦 Preparing {len(items)} file(s) for upload to {repo_id}...")
+    print(f"  Uploading {len(items)} file(s) to {repo_id}...")
 
-    with click.progressbar(items, label="Uploading") as bar:
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_upload_item, repo_id, path_in_repo, local_path, revision, token): (
-                    path_in_repo,
-                    local_path,
-                )
-                for path_in_repo, local_path in bar
-            }
-            for future in as_completed(futures):
-                pass  # exceptions are raised by the submited task
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_upload_item, repo_id, path_in_repo, local_path, revision, token): (
+                path_in_repo,
+                local_path,
+            )
+            for path_in_repo, local_path in items
+        }
+        for future in as_completed(futures):
+            pass  # exceptions are raised by the submitted task
 
-    click.echo(f"✅ Uploaded to {repo_id}")
+    print(f"  Done. Uploaded to {repo_id}")

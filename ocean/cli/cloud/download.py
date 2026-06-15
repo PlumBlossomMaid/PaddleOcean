@@ -105,3 +105,41 @@ def download(
             _download_file(str(items["download_url"]), str(dl_path), token)
 
     click.echo(f"✅ Downloaded from {repo_id}")
+
+
+# ── Public Python API ────────────────────────────────────────────────
+
+
+def download_file(
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: str = ".",
+    repo_type: str = "dataset",
+    revision: str = "master",
+    token: Optional[str] = None,
+) -> str:
+    """Download a single file from AI Studio.
+
+    Args:
+        repo_id: ``username/repo-name``.
+        path_in_repo: File path within the repo.
+        local_dir: Local directory to save to.
+        repo_type: ``"dataset"`` or ``"model"``.
+        revision: Branch name.
+        token: AI Studio access token.
+
+    Returns:
+        Path to the downloaded file.
+
+    Examples:
+        >>> download_file("PlumBlossom/MyDataset", "data.zip")
+    """
+    token = token or get_token()
+    _config.validate_repo_id(repo_id)
+    git_host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
+    dest_dir = Path(local_dir).expanduser().resolve()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    url = f"{git_host}/{repo_id}/raw/branch/{revision}/{path_in_repo}"
+    out = dest_dir / Path(path_in_repo).name
+    _download_file(url, str(out), token, desc=path_in_repo)
+    return str(out)
