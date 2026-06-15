@@ -433,7 +433,7 @@ def _sts_multipart_upload(sts_token: dict, local_path: str, desc: str) -> None:
     def _upload_with_retry(pn, sz, offset, max_retries=5):
         for attempt in range(1, max_retries + 1):
             try:
-                etag = client.upload_part_from_file(
+                resp = client.upload_part_from_file(
                     bucket,
                     key,
                     upload_id,
@@ -442,7 +442,7 @@ def _sts_multipart_upload(sts_token: dict, local_path: str, desc: str) -> None:
                     local_path,
                     offset,
                 )
-                return etag.strip('"')
+                return resp.metadata.etag
             except Exception:
                 if attempt < max_retries:
                     wait = min(2**attempt, 30)
@@ -451,7 +451,7 @@ def _sts_multipart_upload(sts_token: dict, local_path: str, desc: str) -> None:
                 else:
                     raise
 
-    upload_id = client.initiate_multipart_upload(bucket, key)
+    upload_id = client.initiate_multipart_upload(bucket, key).upload_id
 
     # 2. Upload parts in parallel with progress
     part_list = []

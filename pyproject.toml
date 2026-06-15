@@ -13,6 +13,10 @@ dependencies = []
 [project.scripts]
 ocean = "ocean.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["ocean*"]
+exclude = ["memory*"]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
