@@ -364,7 +364,64 @@ def _check_file_exists(repo_id: str, path_in_repo: str, revision: str, token: st
     return None
 
 
-# ── LFS flow (BOS via direct REST, no BCE SDK) ───────────────────────
+# ── BOS upload helpers ──────────────────────────────────────────────
+
+
+def _http_put(url: str, local_path: str, desc: str) -> None:
+    """Upload a file to BOS via streaming HTTP PUT."""
+    file_size = os.path.getsize(local_path)
+
+    def _iter_upload():
+        with open(local_path, "rb") as f:
+            with ColoredTqdm(
+                total=file_size,
+                unit="B",
+                unit_scale=True,
+                desc=f"  ☁️  {desc}",
+                leave=False,
+            ) as pbar:
+                while True:
+                    chunk = f.read(8 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+                    pbar.update(len(chunk))
+
+    resp = requests.put(
+        url,
+        data=_iter_upload(),
+        headers={"Content-Type": "application/octet-stream"},
+        timeout=7200,
+    )
+    resp.raise_for_status()
+
+
+def _sts_multipart_upload(sts_token: dict, local_path: str, desc: str) -> None:
+    """Upload via STS multipart using aistudio_sdk's bos_sdk (if available)."""
+    try:
+        from aistudio_sdk.utils.bos_sdk import sts_client, upload_super_file
+
+        bos_host = sts_token.get("bosHost", "")
+        if not bos_host.startswith("http"):
+            bos_host = "https://" + bos_host
+        client = sts_client(
+            bos_host,
+            sts_token.get("accessKeyId"),
+            sts_token.get("secretAccessKey"),
+            sts_token.get("sessionToken"),
+        )
+        click.echo(f"  ☁️  [STS] Uploading {desc}...")
+        upload_super_file(
+            client,
+            bucket=sts_token.get("bucketName", ""),
+            file=local_path,
+            key=sts_token.get("key", ""),
+        )
+    except ImportError:
+        raise click.ClickException("STS multipart upload requires aistudio-sdk: pip install aistudio-sdk")
+
+
+# ── LFS flow ────────────────────────────────────────────────────────
 
 
 def _lfs_upload_file(
@@ -417,71 +474,16 @@ def _lfs_upload_file(
         # Step 2: Upload file content to BOS
         desc = f"{path_in_repo} ({file_size / 1024 / 1024:.1f} MB)"
 
-        if sts_token and sts_token.get("bosHost"):
-            file_size_mb = file_size / 1024 / 1024
-            if file_size_mb > 5 * 1024:  # > 5GB needs multipart
-                bos = BosRestClient(
-                    bos_host=sts_token["bosHost"],
-                    access_key=sts_token["accessKeyId"],
-                    secret_key=sts_token["secretAccessKey"],
-                    session_token=sts_token["sessionToken"],
-                )
-                bucket = sts_token.get("bucketName", "")
-                key = sts_token.get("key", "")
-                chunk_size_mb = int(os.environ.get("OCEAN_UPLOAD_CHUNK_SIZE_MB", 5))
-                thread_num = os.environ.get("OCEAN_UPLOAD_THREAD_NUM", None)
-                thread_num = int(thread_num) if thread_num else None
-                bos.put_super_object(bucket, key, local_path, chunk_size_mb=chunk_size_mb, thread_num=thread_num)
-            else:
-
-                def _iter_upload():
-                    with open(local_path, "rb") as f:
-                        with ColoredTqdm(
-                            total=file_size,
-                            unit="B",
-                            unit_scale=True,
-                            desc=f"  ☁️  {desc}",
-                            leave=False,
-                        ) as pbar:
-                            while True:
-                                chunk = f.read(8 * 1024 * 1024)
-                                if not chunk:
-                                    break
-                                yield chunk
-                                pbar.update(len(chunk))
-
-                resp2 = requests.put(
-                    upload_href,
-                    data=_iter_upload(),
-                    headers={"Content-Type": "application/octet-stream"},
-                    timeout=7200,
-                )
-                resp2.raise_for_status()
+        if sts_token and sts_token.get("bosHost") and file_size > 5 * 1024**3:
+            # Files >5GB need multipart (BOS single PUT limit). Try HTTP PUT first;
+            # it often works, but fall back to aistudio_sdk's bos_sdk if available.
+            try:
+                _http_put(upload_href, local_path, desc)
+            except requests.exceptions.RequestException:
+                click.echo("  ⚠️  HTTP PUT failed, trying STS multipart...")
+                _sts_multipart_upload(sts_token, local_path, desc)
         else:
-
-            def _iter_upload():
-                with open(local_path, "rb") as f:
-                    with ColoredTqdm(
-                        total=file_size,
-                        unit="B",
-                        unit_scale=True,
-                        desc=f"  ☁️  {desc}",
-                        leave=False,
-                    ) as pbar:
-                        while True:
-                            chunk = f.read(8 * 1024 * 1024)
-                            if not chunk:
-                                break
-                            yield chunk
-                            pbar.update(len(chunk))
-
-            resp2 = requests.put(
-                upload_href,
-                data=_iter_upload(),
-                headers={"Content-Type": "application/octet-stream"},
-                timeout=7200,
-            )
-            resp2.raise_for_status()
+            _http_put(upload_href, local_path, desc)
     else:
         click.echo(f"  ⏭️  {path_in_repo}: content already exists on remote (reusing hash).")
 
