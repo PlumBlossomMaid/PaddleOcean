@@ -580,29 +580,25 @@ class Trainer:
         return False
 
     def _sanity_check(self, model: Any, device: Any) -> None:
-        """Sanity check with progress bar."""
+        """Run sanity check (progress via TQDMProgressBar hooks)."""
+        from ocean.trainer.call import _call_callback_hooks
+
         model.eval()
-        try:
-            from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
-        except ImportError:
-            from tqdm import tqdm
+        _call_callback_hooks(self, "on_validation_start", model)
         for dataloader in self.val_dataloaders:
-            total = (
-                min(self.num_sanity_val_steps, len(dataloader))
-                if hasattr(dataloader, "__len__")
-                else self.num_sanity_val_steps
-            )
-            pbar = tqdm(total=total, desc="Sanity Check", leave=False, unit="step", ncols=80)
             count = 0
             with paddle.no_grad():
                 for batch_idx, batch in enumerate(dataloader):
                     if count >= self.num_sanity_val_steps:
                         break
                     batch = self._move_to_device(batch, device)
+                    _call_callback_hooks(self, "on_validation_batch_start", model, batch, batch_idx, dataloader_idx=0)
                     model.validation_step(batch, batch_idx)
+                    _call_callback_hooks(
+                        self, "on_validation_batch_end", model, None, batch, batch_idx, dataloader_idx=0
+                    )
                     count += 1
-                    pbar.update(1)
-            pbar.close()
+        _call_callback_hooks(self, "on_validation_end", model)
 
     def _teardown(self) -> None:
         self.strategy.teardown()
