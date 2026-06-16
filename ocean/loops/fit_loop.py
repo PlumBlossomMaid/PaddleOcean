@@ -98,7 +98,7 @@ class _FitLoop(_Loop):
                     and trainer.dataloader_step % trainer.log_every_n_steps == 0
                     and trainer.verbose > 0
                 ):
-                    pass
+                    trainer._print(f"  train step {trainer.dataloader_step}")
 
                 if 0 < trainer.max_steps <= trainer.dataloader_step:
                     trainer.should_stop = True
