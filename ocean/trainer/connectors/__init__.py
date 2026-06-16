@@ -162,6 +162,10 @@ class _CallbackConnector:
         callbacks = callbacks or []
         if enable_checkpointing and not any(isinstance(cb, ModelCheckpoint) for cb in callbacks):
             callbacks.append(ModelCheckpoint(dirpath=default_root_dir or "."))
+        if enable_progress_bar and not any(cb.__class__.__name__ == "TQDMProgressBar" for cb in callbacks):
+            from ocean.callbacks.progress import TQDMProgressBar
+
+            callbacks.append(TQDMProgressBar())
         if max_time is not None and not any(cb.__class__.__name__ == "Timer" for cb in callbacks):
             from ocean.callbacks.timer import Timer
 

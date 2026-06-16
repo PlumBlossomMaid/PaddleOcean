@@ -95,13 +95,7 @@ class _FitLoop(_Loop):
 
                 model.on_train_batch_end(result, batch, batch_idx)
 
-                # Logging (progress bar handled by TQDMProgressBar)
-                if (
-                    trainer.dataloader_step > 0
-                    and trainer.dataloader_step % trainer.log_every_n_steps == 0
-                    and trainer.verbose > 0
-                ):
-                    trainer._print(f"  train step {trainer.dataloader_step}")
+                # TQDMProgressBar handles progress display
 
                 if 0 < trainer.max_steps <= trainer.dataloader_step:
                     trainer.should_stop = True
