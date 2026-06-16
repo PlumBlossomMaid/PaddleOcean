@@ -1,4 +1,4 @@
-"""paddleOcean - A high-level PaddlePaddle framework inspired by PyTorch Lightning.
+"""paddleOcean - A high-level PaddlePaddle framework inspired by paddleOcean.
 
 Usage::
 
@@ -107,7 +107,7 @@ from ocean.model import Model
 from ocean.plugins import MixedPrecision, Precision
 from ocean.strategies import DDPStrategy, DeepSpeedStrategy, FSDPStrategy, SingleDeviceStrategy, Strategy
 from ocean.trainer import Trainer
-from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook
+from ocean.trainer.call import _call_callback_hooks, _call_module_hook
 from ocean.trainer.connectors import _CallbackConnector, _CheckpointConnector, _DataConnector, _LoggerConnector
 from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerStatus
 from ocean.utils.enums import OceanEnum

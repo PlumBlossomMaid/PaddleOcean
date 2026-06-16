@@ -11,7 +11,7 @@ import paddle
 
 
 class Gear:
-    """Lightweight manual training API (analogous to Lightning Fabric).
+    """Lightweight manual training API (analogous to ocean Fabric).
 
     Usage::
 

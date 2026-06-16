@@ -8,7 +8,7 @@ import paddle
 class OceanOptimizer:
     """Wrapper around a Paddle optimizer that adds hooks for the training loop.
 
-    Analogous to LightningOptimizer in PyTorch Lightning.
+    Analogous to paddleOceanOptimizer in paddleOcean.
     """
 
     def __init__(self, optimizer: paddle.optimizer.Optimizer) -> None:

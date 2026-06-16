@@ -1,6 +1,6 @@
 """ocelogger - Unified logger wrapper for paddleOcean.
 
-Analogous to Lightning's LitLogger.
+Analogous to ocean's LitLogger.
 Provides a consistent interface for all loggers.
 """
 

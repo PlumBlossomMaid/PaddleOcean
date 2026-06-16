@@ -12,7 +12,7 @@ class CSVLogger(Logger):
 
     Args:
         root_dir: Root directory for logs.
-        name: Experiment name. Default: ``'lightning_logs'``.
+        name: Experiment name. Default: ``'ocean_logs'``.
         version: Experiment version. Auto-incremented if None.
         prefix: Prefix for metric keys.
         flush_logs_every_n_steps: Flush to disk every N steps.
@@ -23,7 +23,7 @@ class CSVLogger(Logger):
     def __init__(
         self,
         root_dir: str,
-        name: str = "lightning_logs",
+        name: str = "ocean_logs",
         version: Optional[str] = None,
         prefix: str = "",
         flush_logs_every_n_steps: int = 100,

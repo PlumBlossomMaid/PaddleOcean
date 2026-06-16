@@ -14,7 +14,7 @@ class VisualDLLogger(Logger):
 
     Args:
         save_dir: Directory to save logs.
-        name: Experiment name. Default: ``'lightning_logs'``.
+        name: Experiment name. Default: ``'ocean_logs'``.
         version: Experiment version. Auto-incremented if None.
         prefix: Prefix for metric keys.
     """
@@ -22,7 +22,7 @@ class VisualDLLogger(Logger):
     def __init__(
         self,
         save_dir: str,
-        name: str = "lightning_logs",
+        name: str = "ocean_logs",
         version: Optional[str] = None,
         prefix: str = "",
     ) -> None:

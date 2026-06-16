@@ -3,7 +3,7 @@
 Saves a running average of model weights during the last phase of training,
 then swaps the averaged weights in at the end for improved generalization.
 
-Follows Lightning's StochasticWeightAveraging pattern.
+Follows ocean's StochasticWeightAveraging pattern.
 """
 
 from __future__ import annotations

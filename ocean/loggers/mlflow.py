@@ -26,7 +26,7 @@ class MLFlowLogger(Logger):
 
     def __init__(
         self,
-        experiment_name: str = "lightning_logs",
+        experiment_name: str = "ocean_logs",
         run_name: Optional[str] = None,
         tracking_uri: Optional[str] = None,
         tags: Optional[dict[str, Any]] = None,

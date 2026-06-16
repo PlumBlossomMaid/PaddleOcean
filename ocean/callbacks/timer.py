@@ -1,6 +1,6 @@
 """Timer callback - stop training after a time duration.
 
-Fully aligned with PyTorch Lightning's Timer callback (non-TPU, non-XLA parts).
+Fully aligned with paddleOcean's Timer callback (non-TPU, non-XLA parts).
 
 Usage:
     from ocean.callbacks import Timer
@@ -90,11 +90,9 @@ class Timer(Callback):
 
         # Internal state
         self._start_time: Optional[float] = None
-        self._epoch_start_time: Optional[float] = None
         self._training_start_time: Optional[float] = None
-        self._validation_end_time: Optional[float] = None
-        self._testing_end_time: Optional[float] = None
         self._total_train_time: float = 0.0
+        self._epoch_time_start: Optional[float] = None
 
     @property
     def start_time(self) -> Optional[float]:
@@ -131,6 +129,29 @@ class Timer(Callback):
         remaining = self.time_remaining
         if remaining is not None and remaining <= 0:
             trainer.should_stop = True
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        """Mark start of training phase (ocean-compatible)."""
+        self._training_start_time = time.time()
+        self._epoch_time_start = time.time()
+
+    def on_train_epoch_start(self, trainer: Any, pl_module: Any) -> None:
+        self._epoch_time_start = time.time()
+
+    def on_train_end(self, trainer: Any, pl_module: Any) -> None:
+        """Accumulate training time (ocean-compatible)."""
+        if self._training_start_time is not None:
+            self._total_train_time += time.time() - self._training_start_time
+
+    def on_validation_end(self, trainer: Any, pl_module: Any) -> None:
+        """Reset training timer after validation (ocean-compatible)."""
+        self._training_start_time = time.time()
+
+    def on_test_end(self, trainer: Any, pl_module: Any) -> None:
+        """Reset training timer after testing (ocean-compatible)."""
+        self._training_start_time = time.time()
+
+    # ── Existing hooks ──
 
     def on_fit_start(self, trainer: Any, pl_module: Any) -> None:
         if self._start_time is None:

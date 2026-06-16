@@ -1,6 +1,6 @@
 """Advanced profiler using PaddlePaddle's profiler API.
 
-Analogous to Lightning's advanced profiler.
+Analogous to ocean's advanced profiler.
 """
 
 import time

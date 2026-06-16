@@ -10,7 +10,7 @@ from ocean.trainer.call import (
     _call_and_handle_interrupt,
     _call_callback_hooks,
     _call_configure_model,
-    _call_lightning_module_hook,
+    _call_module_hook,
     _call_setup_hook,
 )
 from ocean.trainer.connectors import (
@@ -25,7 +25,7 @@ from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerS
 
 
 class Trainer:
-    """Complete training engine with all Lightning components.
+    """Complete training engine with all ocean components.
 
     Args:
         max_epochs: Stop after this many epochs. Default: 1000.
@@ -367,7 +367,7 @@ class Trainer:
         self._callback_connector._attach_model_callbacks()
 
         # Fit start hooks
-        _call_lightning_module_hook(self, "on_fit_start")
+        _call_module_hook(self, "on_fit_start")
         _call_callback_hooks(self, "on_fit_start")
 
         # Sanity check
@@ -378,12 +378,13 @@ class Trainer:
         self.fit_loop.run()
 
         # Fit end hooks
-        _call_lightning_module_hook(self, "on_fit_end")
+        _call_module_hook(self, "on_fit_end")
         _call_callback_hooks(self, "on_fit_end")
         self._teardown()
 
     def _advance_optimizer_step(self) -> None:
         self._optimizer_step += 1
+        self._dataloader_step += 1  # keep in sync for manual optimization mode
 
     # ====================================================================
     # Validate / Test / Predict
@@ -518,8 +519,14 @@ class Trainer:
         if rank_zero_only and not self.is_global_zero:
             return
 
-        self._log_metrics_buffer[name].append(value)
-        self._logger_connector.log_metric_value(name, float(value), prog_bar=prog_bar)
+        # Respect on_step/on_epoch flags (ocean-compatible)
+        step_log = on_step if on_step is not None else True
+        epoch_log = on_epoch if on_epoch is not None else True
+
+        if epoch_log:
+            self._log_metrics_buffer[name].append(value)
+        if step_log:
+            self._logger_connector.log_metric_value(name, float(value), prog_bar=prog_bar)
 
     def _compute_epoch_metrics(self) -> None:
         """Reduce buffered metrics into epoch-level values."""
@@ -532,8 +539,16 @@ class Trainer:
     # Internal utilities
     # ====================================================================
 
-    def _resolve_device(self) -> paddle.CPUPlace:
-        if self.accelerator_flag in ("auto", "cpu"):
+    def _resolve_device(self) -> Any:
+        """Resolve device consistent with _AcceleratorConnector auto-detection.
+
+        ocean-compatible: auto mode checks CUDA availability.
+        """
+        if self.accelerator_flag == "auto":
+            if paddle.is_compiled_with_cuda():
+                return paddle.CUDAPlace(0)
+            return paddle.CPUPlace()
+        if self.accelerator_flag == "cpu":
             return paddle.CPUPlace()
         if self.accelerator_flag == "gpu":
             if paddle.is_compiled_with_cuda():
@@ -578,6 +593,16 @@ class Trainer:
             return False
         return self.current_epoch % self.check_val_every_n_epoch == 0
 
+    def _should_check_val_step(self, step: int) -> bool:
+        """Check if validation should run at this training step (ocean-compatible).
+
+        Only triggered when val_check_interval is an int (every N steps).
+        """
+        val_interval = self.val_check_interval
+        if not isinstance(val_interval, int) or val_interval <= 0:
+            return False
+        return step % val_interval == 0
+
     def _should_stop(self) -> bool:
         return self.should_stop or (0 < self.max_steps <= self._dataloader_step)
 
@@ -611,6 +636,7 @@ class Trainer:
             _call_callback_hooks(self, "on_validation_end")
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
+            model.train()  # restore train mode after sanity check (fix: BN/Dropout)
 
     def _teardown(self) -> None:
         self.strategy.teardown()

@@ -21,7 +21,7 @@ class Strategy(ABC):
         self._accelerator = accelerator
         self._precision_plugin = precision_plugin or Precision()
         self._model: Optional[paddle.nn.Layer] = None
-        self._lightning_module: Optional[Any] = None
+        self._model: Optional[Any] = None
         self._optimizers: list = []
 
     @property
@@ -41,8 +41,8 @@ class Strategy(ABC):
         return self._model
 
     @property
-    def lightning_module(self) -> Optional[Any]:
-        return self._lightning_module
+    def model(self) -> Optional[Any]:
+        return self._model
 
     @property
     def optimizers(self) -> list:
@@ -73,7 +73,7 @@ class Strategy(ABC):
         return 1
 
     def connect(self, model: Any) -> None:
-        self._lightning_module = model
+        self._model = model
         self._model = model
 
     def setup_environment(self) -> None:
@@ -107,19 +107,19 @@ class Strategy(ABC):
 
     def training_step(self, *args: Any, **kwargs: Any) -> Any:
         with self._precision_plugin.forward_context():
-            return self._lightning_module.training_step(*args, **kwargs)
+            return self._model.training_step(*args, **kwargs)
 
     def validation_step(self, *args: Any, **kwargs: Any) -> Any:
         with self._precision_plugin.forward_context():
-            return self._lightning_module.validation_step(*args, **kwargs)
+            return self._model.validation_step(*args, **kwargs)
 
     def test_step(self, *args: Any, **kwargs: Any) -> Any:
         with self._precision_plugin.forward_context():
-            return self._lightning_module.test_step(*args, **kwargs)
+            return self._model.test_step(*args, **kwargs)
 
     def predict_step(self, *args: Any, **kwargs: Any) -> Any:
         with self._precision_plugin.forward_context():
-            return self._lightning_module.predict_step(*args, **kwargs)
+            return self._model.predict_step(*args, **kwargs)
 
     def reduce(self, tensor: Any, reduce_op: str = "mean", group: Any = None) -> Any:
         return tensor

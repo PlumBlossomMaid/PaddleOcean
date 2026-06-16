@@ -1,5 +1,6 @@
 """EarlyStopping callback - stops training when a monitored metric stops improving."""
 
+import math
 from typing import Any, Optional
 
 from ocean.callbacks.callback import Callback
@@ -63,7 +64,7 @@ class EarlyStopping(Callback):
         self._run_early_stopping_check(trainer)
 
     def _should_skip_check(self, trainer: Any) -> bool:
-        """Skip early stopping during sanity checking (Lightning-compatible)."""
+        """Skip early stopping during sanity checking (ocean-compatible)."""
         return getattr(trainer, "sanity_checking", False)
 
     def _run_early_stopping_check(self, trainer: Any) -> None:
@@ -74,7 +75,52 @@ class EarlyStopping(Callback):
             return
 
         current = logs[self.monitor]
-        if self._monitor_op(current, self.best_score):
+
+        # check_finite: stop if NaN or Inf (ocean-compatible)
+        if self.check_finite and not math.isfinite(current):
+            trainer.should_stop = True
+            self.stopped_epoch = trainer.current_epoch
+            if self.verbose:
+                print(f"EarlyStopping: {self.monitor}={current} is not finite, stopping")
+            return
+
+        # divergence_threshold: stop if metric diverges beyond threshold
+        if self.divergence_threshold is not None:
+            if self.mode == "min" and current >= self.divergence_threshold:
+                trainer.should_stop = True
+                self.stopped_epoch = trainer.current_epoch
+                if self.verbose:
+                    print(f"EarlyStopping: {self.monitor}={current} diverged beyond {self.divergence_threshold}")
+                return
+            elif self.mode == "max" and current <= self.divergence_threshold:
+                trainer.should_stop = True
+                self.stopped_epoch = trainer.current_epoch
+                if self.verbose:
+                    print(f"EarlyStopping: {self.monitor}={current} diverged beyond {self.divergence_threshold}")
+                return
+
+        # stopping_threshold: stop immediately if metric reaches threshold
+        if self.stopping_threshold is not None:
+            if self.mode == "min" and current <= self.stopping_threshold:
+                trainer.should_stop = True
+                self.stopped_epoch = trainer.current_epoch
+                if self.verbose:
+                    print(f"EarlyStopping: {self.monitor}={current} reached stopping threshold")
+                return
+            elif self.mode == "max" and current >= self.stopping_threshold:
+                trainer.should_stop = True
+                self.stopped_epoch = trainer.current_epoch
+                if self.verbose:
+                    print(f"EarlyStopping: {self.monitor}={current} reached stopping threshold")
+                return
+
+        # min_delta: minimum change to qualify as improvement (ocean-compatible)
+        if self.mode == "min":
+            improved = current < self.best_score - self.min_delta
+        else:
+            improved = current > self.best_score + self.min_delta
+
+        if improved:
             self.best_score = current
             self.wait_count = 0
         else:
@@ -84,3 +130,17 @@ class EarlyStopping(Callback):
                 trainer.should_stop = True
                 if self.verbose:
                     print(f"EarlyStopping: {self.monitor} did not improve for {self.patience} checks")
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return state dict for checkpoint resume (ocean-compatible)."""
+        return {
+            "wait_count": self.wait_count,
+            "stopped_epoch": self.stopped_epoch,
+            "best_score": self.best_score,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load state dict from checkpoint (ocean-compatible)."""
+        self.wait_count = state_dict.get("wait_count", 0)
+        self.stopped_epoch = state_dict.get("stopped_epoch", 0)
+        self.best_score = state_dict.get("best_score", self.best_score)

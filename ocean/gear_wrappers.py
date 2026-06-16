@@ -1,6 +1,6 @@
 """Wrappers for Gear - _FabricModule and _FabricOptimizer.
 
-Analogous to Lightning Fabric's wrappers.py.
+Analogous to paddleOcean Fabric's wrappers.py.
 Wraps model forward/backward and optimizer step with precision/ddp handling.
 """
 

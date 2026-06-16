@@ -1,4 +1,4 @@
-"""ocean.Model - dual-mode model (Keras + Lightning).
+"""ocean.Model - dual-mode model (Keras + Ocean).
 
 Keras mode:
     net = paddle.nn.Sequential(...)
@@ -6,7 +6,7 @@ Keras mode:
     model.compile(optimizer=..., loss=..., metrics=...)
     model.fit(train_loader, val_loader, epochs=10)
 
-Lightning mode:
+Ocean mode:
     class MyModel(ocean.Model):
         def training_step(self, batch, batch_idx): ...
         def configure_optimizers(self): ...
@@ -23,7 +23,7 @@ from paddle import nn
 
 
 class Model(nn.Layer):
-    """Dual-mode model: Keras (via model) or Lightning (via hooks).
+    """Dual-mode model: Keras (via model) or Ocean (via hooks).
 
     Args:
         model: Optional bare nn.Layer for Keras mode.
@@ -65,12 +65,56 @@ class Model(nn.Layer):
         return self._trainer.current_epoch if self._trainer else 0
 
     @property
+    def global_step(self) -> int:
+        """Alias for dataloader_step (ocean-compatible)."""
+        return self.dataloader_step
+
+    @property
     def dataloader_step(self) -> int:
         return self._trainer.dataloader_step if self._trainer else 0
 
     @property
     def optimizer_step(self) -> int:
         return self._trainer.optimizer_step if self._trainer else 0
+
+    @property
+    def global_rank(self) -> int:
+        """Global rank (ocean-compatible)."""
+        try:
+            import paddle.distributed as dist
+            if dist.is_initialized():
+                return dist.get_rank()
+        except Exception:
+            pass
+        return 0
+
+    @property
+    def local_rank(self) -> int:
+        """Local rank within a node (ocean-compatible)."""
+        try:
+            import os
+            return int(os.environ.get("PADDLE_LOCAL_RANK", 0))
+        except Exception:
+            return 0
+
+    @property
+    def on_gpu(self) -> bool:
+        """Whether the model is on a GPU (ocean-compatible)."""
+        return paddle.is_compiled_with_cuda()
+
+    @property
+    def logger(self) -> Any:
+        """The first logger from the Trainer (ocean-compatible)."""
+        if self._trainer and getattr(self._trainer, "loggers", None):
+            return self._trainer.loggers[0]
+        return None
+
+    @property
+    def loggers(self) -> list:
+        """All loggers from the Trainer (ocean-compatible)."""
+        if self._trainer:
+            return getattr(self._trainer, "loggers", [])
+        return []
 
     @property
     def example_input_array(self) -> Any:
@@ -112,7 +156,7 @@ class Model(nn.Layer):
             self._metrics_name_cache.append(name)
 
     # ====================================================================
-    # Lightning hooks (override in subclass)
+    # Model hooks (override in subclass)
     # ====================================================================
 
     def training_step(self, batch: Any, batch_idx: int) -> Union[paddle.Tensor, dict[str, Any], None]:
@@ -173,6 +217,68 @@ class Model(nn.Layer):
     def on_test_model_train(self) -> None:
         self.train()
 
+    # ── Additional ocean-aligned hooks ──
+
+    def on_before_zero_grad(self, optimizer: paddle.optimizer.Optimizer) -> None: ...
+
+    def on_predict_model_eval(self) -> None:
+        self.eval()
+
+    def on_predict_epoch_start(self) -> None: ...
+    def on_predict_epoch_end(self) -> None: ...
+    def on_predict_batch_start(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None: ...
+    def on_predict_batch_end(self, outputs: Any, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None: ...
+
+    def backward(self, loss: paddle.Tensor, *args: Any, **kwargs: Any) -> None:
+        """Override to customize backward (ocean-compatible)."""
+        loss.backward(*args, **kwargs)
+
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: paddle.optimizer.Optimizer,
+        optimizer_closure: Any = None,
+    ) -> None:
+        """Override to customize optimizer step (ocean-compatible)."""
+        optimizer.step()
+
+    def optimizer_zero_grad(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: paddle.optimizer.Optimizer,
+    ) -> None:
+        optimizer.clear_grad()
+
+    def lr_scheduler_step(
+        self,
+        scheduler: Any,
+        metric: Any = None,
+    ) -> None:
+        """Override to customize LR scheduler step (ocean-compatible)."""
+        scheduler.step()
+
+    def manual_backward(self, loss: paddle.Tensor, *args: Any, **kwargs: Any) -> None:
+        """Backward in manual optimization (ocean-compatible)."""
+        loss.backward(*args, **kwargs)
+
+    def freeze(self) -> None:
+        """Freeze all parameters."""
+        for p in self.parameters():
+            p.stop_gradient = True
+
+    def unfreeze(self) -> None:
+        """Unfreeze all parameters."""
+        for p in self.parameters():
+            p.stop_gradient = False
+
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        """Print only on rank 0 (ocean-compatible)."""
+        if self.global_rank == 0:
+            import builtins
+            builtins.print(*args, **kwargs)
+
     # ====================================================================
     # Logging
     # ====================================================================
@@ -186,6 +292,7 @@ class Model(nn.Layer):
         on_step: Optional[bool] = None,
         on_epoch: Optional[bool] = None,
         reduce_fx: str = "mean",
+        enable_graph: bool = False,
         batch_size: Optional[int] = None,
         sync_dist: bool = False,
         sync_dist_group: Optional[Any] = None,
@@ -221,6 +328,7 @@ class Model(nn.Layer):
         on_step: Optional[bool] = None,
         on_epoch: Optional[bool] = None,
         reduce_fx: str = "mean",
+        enable_graph: bool = False,
         batch_size: Optional[int] = None,
         sync_dist: bool = False,
         sync_dist_group: Optional[Any] = None,
@@ -229,7 +337,7 @@ class Model(nn.Layer):
     ) -> None:
         """Log a dictionary of metrics at once.
 
-        Mirrors PyTorch Lightning's log_dict.
+        Mirrors paddleOcean's log_dict.
         """
         for name, value in dictionary.items():
             self.log(
@@ -240,6 +348,7 @@ class Model(nn.Layer):
                 on_step=on_step,
                 on_epoch=on_epoch,
                 reduce_fx=reduce_fx,
+                enable_graph=enable_graph,
                 batch_size=batch_size,
                 sync_dist=sync_dist,
                 sync_dist_group=sync_dist_group,

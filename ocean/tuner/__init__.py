@@ -1,6 +1,6 @@
 """Tuner — batch size finder and learning rate finder.
 
-Analogous to Lightning's Tuner.
+Analogous to ocean's Tuner.
 """
 
 from __future__ import annotations

@@ -17,11 +17,11 @@ class RichModelSummary(ModelSummary):
     def __init__(self, max_depth: int = 1) -> None:
         super().__init__(max_depth)
 
-    def _print_model_summary(self, model: Any) -> None:
+    def _summarize(self, model: Any) -> None:
+        """Override to use rich table instead of plain text (fixes method name mismatch)."""
         try:
             from rich.console import Console
             from rich.table import Table
-            from rich.text import Text
 
             console = Console()
             table = Table(title="Model Summary", show_header=True, header_style="bold magenta")
@@ -32,17 +32,19 @@ class RichModelSummary(ModelSummary):
             total = 0
             trainable = 0
 
-            for name, param in model.named_parameters():
-                num = param.numel().item() if hasattr(param.numel(), "item") else int(param.numel())
-                total += num
-                if not param.stop_gradient:
-                    trainable += num
-
-            for name, module in model.named_children():
-                num = sum(
-                    p.numel().item() if hasattr(p.numel(), "item") else int(p.numel()) for p in module.parameters()
+            for name, layer in self._named_layers_depth(model, self.max_depth):
+                params = sum(
+                    p.numel().item() if hasattr(p.numel(), "item") else int(p.numel())
+                    for p in layer.parameters()
                 )
-                table.add_row(name, module.__class__.__name__, f"{num:,}")
+                total += params
+                if any(not p.stop_gradient for p in layer.parameters()):
+                    trainable += sum(
+                        p.numel().item() if hasattr(p.numel(), "item") else int(p.numel())
+                        for p in layer.parameters() if not p.stop_gradient
+                    )
+
+                table.add_row(name, layer.__class__.__name__, f"{params:,}")
 
             table.add_section()
             table.add_row("Total params", "", f"{total:,}")
@@ -51,4 +53,5 @@ class RichModelSummary(ModelSummary):
 
             console.print(table)
         except ImportError:
-            super()._print_model_summary(model)
+            # Fallback to plain text
+            super()._summarize(model)

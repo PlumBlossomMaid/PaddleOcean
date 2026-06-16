@@ -367,7 +367,7 @@ class _AcceleratorConnector:
     def _set_flags(deterministic: Any = None, benchmark: Any = None) -> None:
         """Set flags for deterministic/benchmark modes.
 
-        Mirrors PyTorch Lightning's _set_torch_flags.
+        Mirrors paddleOcean's _set_torch_flags.
         PaddlePaddle may not support cudnn flags via set_flags on all builds,
         so we use try/except and fall back to environment variables.
         """

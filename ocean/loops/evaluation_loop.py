@@ -8,7 +8,7 @@ import paddle
 from ocean.loops.fetchers import _DataFetcher
 from ocean.loops.loop import _Loop
 from ocean.loops.progress import _BatchProgress
-from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook
+from ocean.trainer.call import _call_callback_hooks, _call_module_hook
 from ocean.trainer.states import RunningStage, TrainerFn
 
 
@@ -64,16 +64,18 @@ class _EvaluationLoop(_Loop):
             return []
 
         model.eval()
-        _call_lightning_module_hook(trainer, start_hook)
+        _call_module_hook(trainer, start_hook)
         _call_callback_hooks(trainer, start_hook)
-        _call_lightning_module_hook(trainer, epoch_start_hook)
+        _call_module_hook(trainer, epoch_start_hook)
+        _call_callback_hooks(trainer, epoch_start_hook)
 
         with paddle.no_grad():
             for dl_idx, dataloader in enumerate(dataloaders):
                 for batch_idx, batch in enumerate(dataloader):
                     device = trainer._resolve_device()
                     batch = trainer._move_to_device(batch, device)
-                    _call_lightning_module_hook(trainer, batch_start_hook, batch, batch_idx, dl_idx)
+                    _call_callback_hooks(trainer, batch_start_hook, batch, batch_idx, dl_idx)
+                    _call_module_hook(trainer, batch_start_hook, batch, batch_idx, dl_idx)
                     step_fn = getattr(model, step_method)
                     # Check if step_method accepts dataloader_idx (backward compat)
                     sig = inspect.signature(step_fn)
@@ -81,11 +83,13 @@ class _EvaluationLoop(_Loop):
                         result = step_fn(batch, batch_idx, dataloader_idx=dl_idx)
                     else:
                         result = step_fn(batch, batch_idx)
-                    _call_lightning_module_hook(trainer, batch_end_hook, result, batch, batch_idx, dl_idx)
+                    _call_module_hook(trainer, batch_end_hook, result, batch, batch_idx, dl_idx)
+                    _call_callback_hooks(trainer, batch_end_hook, result, batch, batch_idx, dl_idx)
 
         trainer._compute_epoch_metrics()
-        _call_lightning_module_hook(trainer, epoch_end_hook)
-        _call_lightning_module_hook(trainer, end_hook)
+        _call_module_hook(trainer, epoch_end_hook)
+        _call_callback_hooks(trainer, epoch_end_hook)
+        _call_module_hook(trainer, end_hook)
         _call_callback_hooks(trainer, end_hook)
         model.train()
 

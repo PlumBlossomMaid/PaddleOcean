@@ -42,6 +42,44 @@ class TQDMProgressBar(ProgressBar):
         super().__init__()
         self._train_tqdm = None
         self._val_tqdm = None
+        self._test_tqdm = None
+        self._predict_tqdm = None
+
+    @staticmethod
+    def _get_total(trainer: Any, stage: str) -> Optional[int]:
+        """Get total number of batches for a stage."""
+        if stage == "train":
+            dl = getattr(trainer, "train_dataloader", None)
+            if dl is not None:
+                try:
+                    return len(dl)
+                except TypeError:
+                    pass
+            max_steps = getattr(trainer, "max_steps", None)
+            if max_steps and max_steps > 0:
+                return max_steps
+        elif stage in ("val", "sanity"):
+            dls = getattr(trainer, "val_dataloaders", None)
+            if dls:
+                try:
+                    return sum(len(dl) for dl in dls if hasattr(dl, "__len__"))
+                except TypeError:
+                    pass
+        elif stage == "test":
+            dls = getattr(trainer, "test_dataloaders", None)
+            if dls:
+                try:
+                    return sum(len(dl) for dl in dls if hasattr(dl, "__len__"))
+                except TypeError:
+                    pass
+        elif stage == "predict":
+            dls = getattr(trainer, "predict_dataloaders", None)
+            if dls:
+                try:
+                    return sum(len(dl) for dl in dls if hasattr(dl, "__len__"))
+                except TypeError:
+                    pass
+        return None
 
     def on_train_epoch_start(self, trainer: Any, model: Any) -> None:
         try:
@@ -52,8 +90,7 @@ class TQDMProgressBar(ProgressBar):
                 total=total,
                 desc=f"Epoch {trainer.current_epoch}",
                 leave=True,
-                unit="batch",
-                ncols=120,
+                unit="it",
             )
         except ImportError:
             self._train_tqdm = None
@@ -78,14 +115,14 @@ class TQDMProgressBar(ProgressBar):
             from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
 
             total = (
-                trainer.num_sanity_val_steps if trainer.num_sanity_val_steps > 0 else self._get_total(trainer, "val")
+                trainer.num_sanity_val_steps if getattr(trainer, "sanity_checking", False)
+                else self._get_total(trainer, "val")
             )
             self._val_tqdm = tqdm(
                 total=total,
                 desc="Validation" if trainer.dataloader_step > 0 else "Sanity Check",
                 leave=False,
-                unit="step",
-                ncols=80,
+                unit="it",
             )
         except ImportError:
             self._val_tqdm = None
@@ -100,3 +137,57 @@ class TQDMProgressBar(ProgressBar):
         if self._val_tqdm is not None:
             self._val_tqdm.close()
             self._val_tqdm = None
+
+    # ── Test progress ──
+
+    def on_test_start(self, trainer: Any, model: Any) -> None:
+        try:
+            from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
+
+            total = self._get_total(trainer, "test")
+            self._test_tqdm = tqdm(
+                total=total,
+                desc="Testing",
+                leave=True,
+                unit="it",
+            )
+        except ImportError:
+            self._test_tqdm = None
+
+    def on_test_batch_end(
+        self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int, dataloader_idx: int = 0
+    ) -> None:
+        if self._test_tqdm is not None:
+            self._test_tqdm.update(1)
+
+    def on_test_end(self, trainer: Any, model: Any) -> None:
+        if self._test_tqdm is not None:
+            self._test_tqdm.close()
+            self._test_tqdm = None
+
+    # ── Predict progress ──
+
+    def on_predict_start(self, trainer: Any, model: Any) -> None:
+        try:
+            from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
+
+            total = self._get_total(trainer, "predict")
+            self._predict_tqdm = tqdm(
+                total=total,
+                desc="Predicting",
+                leave=True,
+                unit="it",
+            )
+        except ImportError:
+            self._predict_tqdm = None
+
+    def on_predict_batch_end(
+        self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int, dataloader_idx: int = 0
+    ) -> None:
+        if self._predict_tqdm is not None:
+            self._predict_tqdm.update(1)
+
+    def on_predict_end(self, trainer: Any, model: Any) -> None:
+        if self._predict_tqdm is not None:
+            self._predict_tqdm.close()
+            self._predict_tqdm = None

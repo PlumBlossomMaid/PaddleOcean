@@ -11,8 +11,8 @@ def _call_callback_hooks(trainer: Any, hook_name: str, *args: Any, **kwargs: Any
             fn(trainer, trainer._model, *args, **kwargs)
 
 
-def _call_lightning_module_hook(trainer: Any, hook_name: str, *args: Any, **kwargs: Any) -> Any:
-    """Call a hook on the model/LightningModule."""
+def _call_module_hook(trainer: Any, hook_name: str, *args: Any, **kwargs: Any) -> Any:
+    """Call a hook on the model."""
     model = trainer._model
     if model is None:
         return None

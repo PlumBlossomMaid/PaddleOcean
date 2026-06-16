@@ -25,7 +25,7 @@ class TensorBoardLogger(Logger):
     def __init__(
         self,
         save_dir: str,
-        name: str = "lightning_logs",
+        name: str = "ocean_logs",
         version: Optional[str] = None,
         sub_dir: Optional[str] = None,
         prefix: str = "",

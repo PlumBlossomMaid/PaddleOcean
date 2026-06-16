@@ -45,7 +45,7 @@ INTENTIONAL_DIFFERENCES = {
     "_EvaluationLoop",
     "_PredictionLoop",
     "_call_callback_hooks",
-    "_call_lightning_module_hook",
+    "_call_module_hook",
     "_DataConnector",
     "_LoggerConnector",
     "_CallbackConnector",

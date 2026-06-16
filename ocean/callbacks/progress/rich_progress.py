@@ -2,10 +2,10 @@
 
 from typing import Any
 
-from ocean.callbacks.progress.progress_bar import ProgressBar
+from ocean.callbacks.progress.progress_bar import TQDMProgressBar
 
 
-class RichProgressBar(ProgressBar):
+class RichProgressBar(TQDMProgressBar):
     """Progress bar using the rich library.
 
     Falls back to basic console output if rich is not installed.

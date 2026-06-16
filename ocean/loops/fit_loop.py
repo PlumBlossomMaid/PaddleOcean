@@ -8,7 +8,7 @@ from typing import Any, Optional
 import paddle
 
 from ocean.loops.loop import _Loop
-from ocean.trainer.call import _call_callback_hooks, _call_lightning_module_hook
+from ocean.trainer.call import _call_callback_hooks, _call_module_hook
 
 
 class _FitLoop(_Loop):
@@ -36,14 +36,14 @@ class _FitLoop(_Loop):
             return
 
         # On train start
-        _call_lightning_module_hook(trainer, "on_train_start")
+        _call_module_hook(trainer, "on_train_start")
         _call_callback_hooks(trainer, "on_train_start")
 
         device = trainer._resolve_device()
 
         while not self.done:
             # On epoch start
-            _call_lightning_module_hook(trainer, "on_train_epoch_start")
+            _call_module_hook(trainer, "on_train_epoch_start")
             _call_callback_hooks(trainer, "on_train_epoch_start")
 
             # Reset optimizer accumulation
@@ -55,6 +55,7 @@ class _FitLoop(_Loop):
 
                 batch = trainer._move_to_device(batch, device)
 
+                _call_callback_hooks(trainer, "on_train_batch_start", batch, batch_idx)
                 skip = model.on_train_batch_start(batch, batch_idx)
                 if skip == -1:
                     continue
@@ -73,9 +74,11 @@ class _FitLoop(_Loop):
 
                     if loss is not None:
                         model.on_before_backward(loss)
+                        _call_callback_hooks(trainer, "on_before_backward", loss)
                         loss = loss / max(1, trainer.accumulate_grad_batches)
                         loss.backward()
                         model.on_after_backward()
+                        _call_callback_hooks(trainer, "on_after_backward")
                         opt_acc += 1
 
                         if opt_acc >= trainer.accumulate_grad_batches:
@@ -85,17 +88,31 @@ class _FitLoop(_Loop):
                                 elif trainer.gradient_clip_algorithm == "value":
                                     paddle.nn.utils.clip_grad_value_(model.parameters(), trainer.gradient_clip_val)
                             model.on_before_optimizer_step(trainer._optimizer)
+                            _call_callback_hooks(trainer, "on_before_optimizer_step", trainer._optimizer)
                             trainer._optimizers[0].step()
-                            trainer._optimizers[0]._optimizer.clear_grad()
+                            model.on_before_zero_grad(trainer._optimizer)
+                            _call_callback_hooks(trainer, "on_before_zero_grad", trainer._optimizer)
+                            trainer._optimizers[0].clear_grad()
                             opt_acc = 0
                             trainer._dataloader_step += 1
                 else:
-                    # Manual optimization: model handles backward/step, just count steps
-                    trainer._dataloader_step += 1
+                    # Manual optimization: model handles backward/step.
+                    # Step counting is driven by optimizer.step() → _advance_optimizer_step()
+                    # which increments both _optimizer_step and _dataloader_step.
+                    pass
 
                 model.on_train_batch_end(result, batch, batch_idx)
+                _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
 
-                # TQDMProgressBar handles progress display
+                # Periodic logger flush (every log_every_n_steps)
+                if trainer.dataloader_step % max(1, trainer.log_every_n_steps) == 0:
+                    trainer._logger_connector.log_metrics(
+                        trainer.logged_metrics, trainer.dataloader_step
+                    )
+
+                # Step-based validation check (ocean-compatible)
+                if trainer._should_check_val_step(trainer.dataloader_step):
+                    self._run_validation()
 
                 if 0 < trainer.max_steps <= trainer.dataloader_step:
                     trainer.should_stop = True
@@ -103,13 +120,22 @@ class _FitLoop(_Loop):
 
             # Flush remaining gradients
             if opt_acc > 0 and trainer._optimizer is not None:
+                if trainer.gradient_clip_val is not None and trainer.gradient_clip_val > 0:
+                    if trainer.gradient_clip_algorithm == "norm":
+                        paddle.nn.utils.clip_grad_norm_(model.parameters(), trainer.gradient_clip_val)
+                    elif trainer.gradient_clip_algorithm == "value":
+                        paddle.nn.utils.clip_grad_value_(model.parameters(), trainer.gradient_clip_val)
+                model.on_before_optimizer_step(trainer._optimizer)
+                _call_callback_hooks(trainer, "on_before_optimizer_step", trainer._optimizer)
                 trainer._optimizer.step()
+                model.on_before_zero_grad(trainer._optimizer)
+                _call_callback_hooks(trainer, "on_before_zero_grad", trainer._optimizer)
                 trainer._optimizer.clear_grad()
                 trainer._dataloader_step += 1
 
             # On epoch end
             trainer._compute_epoch_metrics()
-            _call_lightning_module_hook(trainer, "on_train_epoch_end")
+            _call_module_hook(trainer, "on_train_epoch_end")
             _call_callback_hooks(trainer, "on_train_epoch_end")
 
             trainer.current_epoch += 1
@@ -122,7 +148,7 @@ class _FitLoop(_Loop):
                 break
 
         # On train end
-        _call_lightning_module_hook(trainer, "on_train_end")
+        _call_module_hook(trainer, "on_train_end")
         _call_callback_hooks(trainer, "on_train_end")
 
     def teardown(self) -> None:
@@ -136,9 +162,10 @@ class _FitLoop(_Loop):
             return
 
         model.on_validation_model_eval()
-        _call_lightning_module_hook(trainer, "on_validation_start")
+        _call_module_hook(trainer, "on_validation_start")
         _call_callback_hooks(trainer, "on_validation_start")
-        _call_lightning_module_hook(trainer, "on_validation_epoch_start")
+        _call_module_hook(trainer, "on_validation_epoch_start")
+        _call_callback_hooks(trainer, "on_validation_epoch_start")
 
         device = trainer._resolve_device()
         for dataloader in val_loader if isinstance(val_loader, (list, tuple)) else [val_loader]:
@@ -147,12 +174,15 @@ class _FitLoop(_Loop):
                     if trainer._should_limit_batches(batch_idx, "val"):
                         break
                     batch = trainer._move_to_device(batch, device)
+                    _call_callback_hooks(trainer, "on_validation_batch_start", batch, batch_idx, dataloader_idx=0)
                     model.on_validation_batch_start(batch, batch_idx)
                     result = model.validation_step(batch, batch_idx)
                     model.on_validation_batch_end(result, batch, batch_idx)
+                    _call_callback_hooks(trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0)
 
         trainer._compute_epoch_metrics()
-        _call_lightning_module_hook(trainer, "on_validation_epoch_end")
+        _call_module_hook(trainer, "on_validation_epoch_end")
+        _call_callback_hooks(trainer, "on_validation_epoch_end")
+        _call_module_hook(trainer, "on_validation_end")
         _call_callback_hooks(trainer, "on_validation_end")
-        _call_lightning_module_hook(trainer, "on_validation_end")
         model.on_validation_model_train()

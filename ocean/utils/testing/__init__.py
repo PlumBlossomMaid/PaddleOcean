@@ -1,6 +1,6 @@
 """Conditional test skipping utilities.
 
-Analogous to Lightning's testing/_runif.py.
+Analogous to ocean's testing/_runif.py.
 
 Usage::
     @RunIf(min_cuda_version="11.0")
