@@ -66,7 +66,7 @@ class Model(nn.Layer):
 
     @property
     def global_step(self) -> int:
-        """Alias for dataloader_step (ocean-compatible)."""
+        """Training step count (ocean-compatible)."""
         return self.dataloader_step
 
     @property
@@ -74,14 +74,11 @@ class Model(nn.Layer):
         return self._trainer.dataloader_step if self._trainer else 0
 
     @property
-    def optimizer_step(self) -> int:
-        return self._trainer.optimizer_step if self._trainer else 0
-
-    @property
     def global_rank(self) -> int:
         """Global rank (ocean-compatible)."""
         try:
             import paddle.distributed as dist
+
             if dist.is_initialized():
                 return dist.get_rank()
         except Exception:
@@ -93,6 +90,7 @@ class Model(nn.Layer):
         """Local rank within a node (ocean-compatible)."""
         try:
             import os
+
             return int(os.environ.get("PADDLE_LOCAL_RANK", 0))
         except Exception:
             return 0
@@ -277,6 +275,7 @@ class Model(nn.Layer):
         """Print only on rank 0 (ocean-compatible)."""
         if self.global_rank == 0:
             import builtins
+
             builtins.print(*args, **kwargs)
 
     # ====================================================================

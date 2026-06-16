@@ -5,8 +5,8 @@ class ModelSummary(Callback):
     def __init__(self, max_depth: int = 1):
         self.max_depth = max_depth
 
-    def on_fit_start(self, trainer, pl_module):
-        self._summarize(pl_module)
+    def on_fit_start(self, trainer, model):
+        self._summarize(model)
 
     def _summarize(self, model):
         print(self._get_summary(model))

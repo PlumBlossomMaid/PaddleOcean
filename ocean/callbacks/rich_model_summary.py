@@ -34,14 +34,14 @@ class RichModelSummary(ModelSummary):
 
             for name, layer in self._named_layers_depth(model, self.max_depth):
                 params = sum(
-                    p.numel().item() if hasattr(p.numel(), "item") else int(p.numel())
-                    for p in layer.parameters()
+                    p.numel().item() if hasattr(p.numel(), "item") else int(p.numel()) for p in layer.parameters()
                 )
                 total += params
                 if any(not p.stop_gradient for p in layer.parameters()):
                     trainable += sum(
                         p.numel().item() if hasattr(p.numel(), "item") else int(p.numel())
-                        for p in layer.parameters() if not p.stop_gradient
+                        for p in layer.parameters()
+                        if not p.stop_gradient
                     )
 
                 table.add_row(name, layer.__class__.__name__, f"{params:,}")

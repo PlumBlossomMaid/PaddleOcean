@@ -287,6 +287,10 @@ class Trainer:
         return self._logger_connector.logged_metrics
 
     @property
+    def progress_bar_metrics(self) -> dict[str, float]:
+        return self._logger_connector.progress_bar_metrics
+
+    @property
     def dataloader_step(self) -> int:
         return self._dataloader_step
 
@@ -384,7 +388,6 @@ class Trainer:
 
     def _advance_optimizer_step(self) -> None:
         self._optimizer_step += 1
-        self._dataloader_step += 1  # keep in sync for manual optimization mode
 
     # ====================================================================
     # Validate / Test / Predict

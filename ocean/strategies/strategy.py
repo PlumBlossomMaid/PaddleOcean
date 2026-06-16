@@ -37,10 +37,6 @@ class Strategy(ABC):
         return self._precision_plugin
 
     @property
-    def model(self) -> Optional[paddle.nn.Layer]:
-        return self._model
-
-    @property
     def model(self) -> Optional[Any]:
         return self._model
 

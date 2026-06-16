@@ -96,19 +96,16 @@ class _FitLoop(_Loop):
                             opt_acc = 0
                             trainer._dataloader_step += 1
                 else:
-                    # Manual optimization: model handles backward/step.
-                    # Step counting is driven by optimizer.step() → _advance_optimizer_step()
-                    # which increments both _optimizer_step and _dataloader_step.
-                    pass
+                    # Manual optimization: model handles backward/step inside training_step.
+                    # Track batch count for max_steps and logger flush.
+                    trainer._dataloader_step += 1
 
                 model.on_train_batch_end(result, batch, batch_idx)
                 _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
 
                 # Periodic logger flush (every log_every_n_steps)
                 if trainer.dataloader_step % max(1, trainer.log_every_n_steps) == 0:
-                    trainer._logger_connector.log_metrics(
-                        trainer.logged_metrics, trainer.dataloader_step
-                    )
+                    trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
 
                 # Step-based validation check (ocean-compatible)
                 if trainer._should_check_val_step(trainer.dataloader_step):

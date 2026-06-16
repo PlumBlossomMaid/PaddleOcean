@@ -15,20 +15,17 @@ class VisualDLLogger(Logger):
     Args:
         save_dir: Directory to save logs.
         name: Experiment name. Default: ``'ocean_logs'``.
-        version: Experiment version. Auto-incremented if None.
-        prefix: Prefix for metric keys.
+        prefix: Prefix for metric keys (DiffSinger-style, no version dirs).
     """
 
     def __init__(
         self,
         save_dir: str,
         name: str = "ocean_logs",
-        version: Optional[str] = None,
         prefix: str = "",
     ) -> None:
         self._save_dir = save_dir
         self._name = name
-        self._version = version
         self._prefix = prefix
         self._experiment = None
 
@@ -38,9 +35,7 @@ class VisualDLLogger(Logger):
 
     @property
     def version(self) -> str:
-        if self._version is None:
-            self._version = self._get_next_version()
-        return self._version
+        return "0"  # DiffSinger-style: no version dirs
 
     @property
     def root_dir(self) -> str:
@@ -48,7 +43,7 @@ class VisualDLLogger(Logger):
 
     @property
     def log_dir(self) -> str:
-        return os.path.join(self._save_dir, self._name, f"version_{self.version}")
+        return os.path.join(self._save_dir, self._name)
 
     @property
     def experiment(self) -> Any:
@@ -57,13 +52,15 @@ class VisualDLLogger(Logger):
         return self._experiment
 
     def _create_experiment(self) -> Any:
-        """Create a VisualDL LogWriter."""
+        """Create a VisualDL LogWriter (DiffSinger-style: no version dirs)."""
         try:
             from visualdl import LogWriter
 
-            return LogWriter(logdir=self.log_dir)
+            logdir = self.log_dir
+            os.makedirs(logdir, exist_ok=True)
+            return LogWriter(logdir=logdir)
         except ImportError:
-            # VisualDL not installed - use a dummy
+
             class _DummyWriter:
                 def add_scalar(self, *args, **kwargs): ...
                 def close(self): ...
@@ -71,11 +68,13 @@ class VisualDLLogger(Logger):
             return _DummyWriter()
 
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
+        if step is None:
+            return
         for k, v in metrics.items():
             key = f"{self._prefix}/{k}" if self._prefix else k
             if hasattr(v, "item"):
                 v = v.item()
-            self.experiment.add_scalar(key, float(v), step or 0)
+            self.experiment.add_scalar(key, float(v), step)
 
     def log_hyperparams(self, params: dict[str, Any]) -> None:
         try:
@@ -97,16 +96,3 @@ class VisualDLLogger(Logger):
                 self._experiment.close()
             except Exception:
                 pass
-
-    def _get_next_version(self) -> str:
-        version_dir = os.path.join(self._save_dir, self._name)
-        if not os.path.exists(version_dir):
-            return "0"
-        existing = [d for d in os.listdir(version_dir) if d.startswith("version_")]
-        versions = []
-        for d in existing:
-            try:
-                versions.append(int(d.replace("version_", "")))
-            except ValueError:
-                continue
-        return str(max(versions) + 1) if versions else "0"

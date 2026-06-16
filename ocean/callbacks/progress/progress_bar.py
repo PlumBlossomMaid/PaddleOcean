@@ -2,6 +2,8 @@
 
 from typing import Any, Optional
 
+import numpy as np
+
 from ocean.callbacks.callback import Callback
 
 
@@ -81,6 +83,26 @@ class TQDMProgressBar(ProgressBar):
                     pass
         return None
 
+    @staticmethod
+    def get_metrics(trainer: Any, model: Any) -> dict[str, Any]:
+        """Get metrics for progress bar display.
+
+        Only shows metrics logged with prog_bar=True (DiffSinger-compatible).
+        Formats floats with smart precision.
+        """
+        items = dict(trainer.progress_bar_metrics)
+        for k, v in list(items.items()):
+            if isinstance(v, float):
+                if np.isnan(v):
+                    items[k] = "nan"
+                elif 0.001 <= abs(v) < 10:
+                    items[k] = f"{v:.4f}"
+                elif abs(v) < 0.001:
+                    items[k] = f"{v:.4e}"
+                else:
+                    items[k] = f"{v:.2f}"
+        return items
+
     def on_train_epoch_start(self, trainer: Any, model: Any) -> None:
         try:
             from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
@@ -98,9 +120,9 @@ class TQDMProgressBar(ProgressBar):
     def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self._train_tqdm is not None:
             self._train_tqdm.update(1)
-            metrics = trainer.callback_metrics
+            metrics = self.get_metrics(trainer, model)
             if metrics:
-                self._train_tqdm.set_postfix(**{k: f"{v:.4f}" for k, v in metrics.items()}, refresh=False)
+                self._train_tqdm.set_postfix(**metrics, refresh=False)
 
     def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
         if self._train_tqdm is not None:
@@ -115,7 +137,8 @@ class TQDMProgressBar(ProgressBar):
             from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
 
             total = (
-                trainer.num_sanity_val_steps if getattr(trainer, "sanity_checking", False)
+                trainer.num_sanity_val_steps
+                if getattr(trainer, "sanity_checking", False)
                 else self._get_total(trainer, "val")
             )
             self._val_tqdm = tqdm(

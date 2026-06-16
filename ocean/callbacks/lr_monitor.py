@@ -15,17 +15,17 @@ class LearningRateMonitor(Callback):
     def __init__(self, logging_interval: str = "step") -> None:
         self.logging_interval = logging_interval
 
-    def on_train_batch_end(self, trainer: Any, pl_module: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
+    def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self.logging_interval != "step":
             return
-        self._record_lr(trainer, pl_module)
+        self._record_lr(trainer, model)
 
-    def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+    def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
         if self.logging_interval != "epoch":
             return
-        self._record_lr(trainer, pl_module)
+        self._record_lr(trainer, model)
 
-    def _record_lr(self, trainer: Any, pl_module: Any) -> None:
+    def _record_lr(self, trainer: Any, model: Any) -> None:
         optimizers = trainer._optimizers
         for i, opt_wrapper in enumerate(optimizers):
             opt = opt_wrapper._optimizer
@@ -34,6 +34,6 @@ class LearningRateMonitor(Callback):
                 actual_lr = lr.numpy() if hasattr(lr, "numpy") else lr
                 if hasattr(actual_lr, "__iter__"):
                     for j, lr_val in enumerate(actual_lr):
-                        pl_module.log(f"lr_{i}_group_{j}", lr_val)
+                        model.log(f"lr/lr_{i}_group_{j}", lr_val)
                 else:
-                    pl_module.log(f"lr_{i}", actual_lr)
+                    model.log(f"lr/lr_{i}", actual_lr)

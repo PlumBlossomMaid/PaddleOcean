@@ -130,30 +130,30 @@ class Timer(Callback):
         if remaining is not None and remaining <= 0:
             trainer.should_stop = True
 
-    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+    def on_train_start(self, trainer: Any, model: Any) -> None:
         """Mark start of training phase (ocean-compatible)."""
         self._training_start_time = time.time()
         self._epoch_time_start = time.time()
 
-    def on_train_epoch_start(self, trainer: Any, pl_module: Any) -> None:
+    def on_train_epoch_start(self, trainer: Any, model: Any) -> None:
         self._epoch_time_start = time.time()
 
-    def on_train_end(self, trainer: Any, pl_module: Any) -> None:
+    def on_train_end(self, trainer: Any, model: Any) -> None:
         """Accumulate training time (ocean-compatible)."""
         if self._training_start_time is not None:
             self._total_train_time += time.time() - self._training_start_time
 
-    def on_validation_end(self, trainer: Any, pl_module: Any) -> None:
+    def on_validation_end(self, trainer: Any, model: Any) -> None:
         """Reset training timer after validation (ocean-compatible)."""
         self._training_start_time = time.time()
 
-    def on_test_end(self, trainer: Any, pl_module: Any) -> None:
+    def on_test_end(self, trainer: Any, model: Any) -> None:
         """Reset training timer after testing (ocean-compatible)."""
         self._training_start_time = time.time()
 
     # ── Existing hooks ──
 
-    def on_fit_start(self, trainer: Any, pl_module: Any) -> None:
+    def on_fit_start(self, trainer: Any, model: Any) -> None:
         if self._start_time is None:
             self._start_time = time.time()
             self._training_start_time = 0.0
@@ -171,11 +171,11 @@ class Timer(Callback):
             print("Timer: Time limit reached during checkpoint load")
             trainer.should_stop = True
 
-    def on_train_batch_end(self, trainer: Any, pl_module: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
+    def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self._interval == "step":
             self._check_time_remaining(trainer)
 
-    def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+    def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
         if self._interval == "epoch":
             self._check_time_remaining(trainer)
 
