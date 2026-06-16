@@ -1,6 +1,6 @@
 """VisualDLLogger - logs metrics to VisualDL (Paddle's native visualization tool).
 
-Analogous to TensorBoardLogger in PyTorch Lightning.
+Lightning-compatible: auto-versioning, save_dir/name/version_N/ structure.
 """
 
 import os
@@ -12,20 +12,25 @@ from ocean.loggers.base import Logger
 class VisualDLLogger(Logger):
     """Log metrics to VisualDL for visualization.
 
+    Lightning-compatible with auto-versioning.
+
     Args:
         save_dir: Directory to save logs.
         name: Experiment name. Default: ``'ocean_logs'``.
-        prefix: Prefix for metric keys (DiffSinger-style, no version dirs).
+        version: Experiment version. Auto-incremented if None.
+        prefix: Prefix for metric keys.
     """
 
     def __init__(
         self,
         save_dir: str,
         name: str = "ocean_logs",
+        version: Optional[Any] = None,
         prefix: str = "",
     ) -> None:
         self._save_dir = save_dir
         self._name = name
+        self._version = version
         self._prefix = prefix
         self._experiment = None
 
@@ -34,8 +39,10 @@ class VisualDLLogger(Logger):
         return self._name
 
     @property
-    def version(self) -> str:
-        return "0"  # DiffSinger-style: no version dirs
+    def version(self) -> Any:
+        if self._version is None:
+            self._version = self._get_next_version()
+        return self._version
 
     @property
     def root_dir(self) -> str:
@@ -43,7 +50,8 @@ class VisualDLLogger(Logger):
 
     @property
     def log_dir(self) -> str:
-        return os.path.join(self._save_dir, self._name)
+        ver = self.version if isinstance(self.version, str) else f"version_{self.version}"
+        return os.path.join(self._save_dir, self._name, ver)
 
     @property
     def experiment(self) -> Any:
@@ -52,13 +60,11 @@ class VisualDLLogger(Logger):
         return self._experiment
 
     def _create_experiment(self) -> Any:
-        """Create a VisualDL LogWriter (DiffSinger-style: no version dirs)."""
+        """Create a VisualDL LogWriter."""
         try:
             from visualdl import LogWriter
 
-            logdir = self.log_dir
-            os.makedirs(logdir, exist_ok=True)
-            return LogWriter(logdir=logdir)
+            return LogWriter(logdir=self.log_dir)
         except ImportError:
 
             class _DummyWriter:
@@ -96,3 +102,18 @@ class VisualDLLogger(Logger):
                 self._experiment.close()
             except Exception:
                 pass
+
+    def _get_next_version(self) -> int:
+        """Scan log dir for existing version_N dirs and auto-increment."""
+        version_dir = os.path.join(self._save_dir, self._name)
+        if not os.path.exists(version_dir):
+            return 0
+        existing_versions = []
+        for d in os.listdir(version_dir):
+            dp = os.path.join(version_dir, d)
+            if os.path.isdir(dp) and d.startswith("version_"):
+                try:
+                    existing_versions.append(int(d.replace("version_", "")))
+                except ValueError:
+                    continue
+        return max(existing_versions) + 1 if existing_versions else 0
