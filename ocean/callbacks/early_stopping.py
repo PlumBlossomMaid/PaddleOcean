@@ -53,14 +53,18 @@ class EarlyStopping(Callback):
         self._monitor_op = self.mode_dict[mode]
 
     def on_validation_end(self, trainer: Any, model: Any) -> None:
-        if self.check_on_train_epoch_end:
+        if self.check_on_train_epoch_end or self._should_skip_check(trainer):
             return
         self._run_early_stopping_check(trainer)
 
     def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
-        if not self.check_on_train_epoch_end:
+        if not self.check_on_train_epoch_end or self._should_skip_check(trainer):
             return
         self._run_early_stopping_check(trainer)
+
+    def _should_skip_check(self, trainer: Any) -> bool:
+        """Skip early stopping during sanity checking (Lightning-compatible)."""
+        return getattr(trainer, "sanity_checking", False)
 
     def _run_early_stopping_check(self, trainer: Any) -> None:
         logs = trainer._log_metrics_on_epoch

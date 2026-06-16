@@ -591,22 +591,26 @@ class Trainer:
         """Run sanity check (progress via TQDMProgressBar hooks)."""
         from ocean.trainer.call import _call_callback_hooks
 
+        self.sanity_checking = True
         model.eval()
-        _call_callback_hooks(self, "on_validation_start")
-        _call_callback_hooks(self, "on_sanity_check_start")
-        for dataloader in self.val_dataloaders:
-            count = 0
-            with paddle.no_grad():
-                for batch_idx, batch in enumerate(dataloader):
-                    if count >= self.num_sanity_val_steps:
-                        break
-                    batch = self._move_to_device(batch, device)
-                    _call_callback_hooks(self, "on_validation_batch_start", batch, batch_idx, dataloader_idx=0)
-                    model.validation_step(batch, batch_idx)
-                    _call_callback_hooks(self, "on_validation_batch_end", None, batch, batch_idx, dataloader_idx=0)
-                    count += 1
-        _call_callback_hooks(self, "on_sanity_check_end")
-        _call_callback_hooks(self, "on_validation_end")
+        try:
+            _call_callback_hooks(self, "on_validation_start")
+            _call_callback_hooks(self, "on_sanity_check_start")
+            for dataloader in self.val_dataloaders:
+                count = 0
+                with paddle.no_grad():
+                    for batch_idx, batch in enumerate(dataloader):
+                        if count >= self.num_sanity_val_steps:
+                            break
+                        batch = self._move_to_device(batch, device)
+                        _call_callback_hooks(self, "on_validation_batch_start", batch, batch_idx, dataloader_idx=0)
+                        model.validation_step(batch, batch_idx)
+                        _call_callback_hooks(self, "on_validation_batch_end", None, batch, batch_idx, dataloader_idx=0)
+                        count += 1
+        finally:
+            _call_callback_hooks(self, "on_validation_end")
+            _call_callback_hooks(self, "on_sanity_check_end")
+            self.sanity_checking = False
 
     def _teardown(self) -> None:
         self.strategy.teardown()
