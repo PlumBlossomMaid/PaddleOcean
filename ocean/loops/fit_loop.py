@@ -182,4 +182,7 @@ class _FitLoop(_Loop):
         _call_callback_hooks(trainer, "on_validation_epoch_end")
         _call_module_hook(trainer, "on_validation_end")
         _call_callback_hooks(trainer, "on_validation_end")
+        # Clear val/test metrics so they don't leak into training log flushes
+        # (Lightning separates val/train metric collections; ocean shares _logged_metrics)
+        trainer._logger_connector.reset_validation_metrics()
         model.on_validation_model_train()
