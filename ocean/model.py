@@ -3,7 +3,7 @@
 Keras mode:
     net = paddle.nn.Sequential(...)
     model = ocean.Model(net)
-    model.compile(optimizer=..., loss=..., metrics=...)
+    model.prepare(optimizer=..., loss=..., metrics=...)
     model.fit(train_loader, val_loader, epochs=10)
 
 Ocean mode:
@@ -47,6 +47,7 @@ class Model(nn.Layer):
         # --- Internal state ---
         self._current_fx_name: Optional[str] = None
         self._automatic_optimization: bool = True
+        self._compiler_ctx: Optional[dict] = None
         self._log_metrics: dict[str, list[float]] = {}
         self._training_step_outputs: list[Any] = []
         self._validation_step_outputs: list[Any] = []
@@ -72,6 +73,10 @@ class Model(nn.Layer):
     @property
     def dataloader_step(self) -> int:
         return self._trainer.dataloader_step if self._trainer else 0
+
+    @property
+    def optimizer_step(self) -> int:
+        return self._trainer.optimizer_step if self._trainer else 0
 
     @property
     def global_rank(self) -> int:
@@ -123,6 +128,23 @@ class Model(nn.Layer):
         self._example_input_array = example
 
     # ====================================================================
+    # JIT Compile (paddle.jit.to_static)
+    # ====================================================================
+
+    def compile(self) -> "Model":
+        """Apply ``paddle.jit.to_static`` to accelerate training.
+
+        Wraps forward and step methods with static graph compilation.
+        Call before passing to ``Trainer.fit()``.
+
+        Returns:
+            self, with compiled methods.
+        """
+        from ocean.utilities.compile import from_compiled
+
+        return from_compiled(self)
+
+    # ====================================================================
     # Forward
     # ====================================================================
 
@@ -132,10 +154,10 @@ class Model(nn.Layer):
         return super().forward(*args, **kwargs)
 
     # ====================================================================
-    # Keras-mode compile
+    # Keras-mode: prepare (equivalent to paddle.Model.prepare)
     # ====================================================================
 
-    def compile(
+    def prepare(
         self,
         optimizer: paddle.optimizer.Optimizer,
         loss: Optional[Union[Callable, list[Callable]]] = None,
@@ -143,7 +165,7 @@ class Model(nn.Layer):
         loss_weights: Optional[list[float]] = None,
     ) -> None:
         if self.__model__ is None:
-            raise ValueError("compile() requires model. Use ocean.Model(model=your_network) for Keras mode.")
+            raise ValueError("prepare() requires model. Use ocean.Model(model=your_network) for Keras mode.")
         self._optimizer = optimizer
         self._loss_fns = [loss] if callable(loss) else (list(loss) if loss is not None else [])
         self._loss_weights = loss_weights
@@ -231,17 +253,17 @@ class Model(nn.Layer):
         """Override to customize backward (ocean-compatible)."""
         loss.backward(*args, **kwargs)
 
-    def optimizer_step(
+    def on_optimizer_step(
         self,
         epoch: int,
         batch_idx: int,
         optimizer: paddle.optimizer.Optimizer,
         optimizer_closure: Any = None,
     ) -> None:
-        """Override to customize optimizer step (ocean-compatible)."""
+        """Override to customize optimizer step."""
         optimizer.step()
 
-    def optimizer_zero_grad(
+    def optimizer_clear_grad(
         self,
         epoch: int,
         batch_idx: int,

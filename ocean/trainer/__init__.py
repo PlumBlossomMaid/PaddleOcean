@@ -332,6 +332,11 @@ class Trainer:
         self._model = model
         model._trainer = self
 
+        # Verify compile compatibility with strategy
+        from ocean.utilities.compile import _verify_strategy_supports_compile
+
+        _verify_strategy_supports_compile(model, self.strategy)
+
         # Fast dev run
         if self.fast_dev_run:
             n = self.fast_dev_run if isinstance(self.fast_dev_run, int) else 1

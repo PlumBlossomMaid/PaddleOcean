@@ -61,7 +61,7 @@ def make_keras_model():
         paddle.nn.Linear(20, 2),
     )
     model = ocean.Model(model=net)
-    model.compile(
+    model.prepare(
         optimizer=paddle.optimizer.SGD(learning_rate=0.01, parameters=net.parameters()),
         loss=paddle.nn.CrossEntropyLoss(),
     )

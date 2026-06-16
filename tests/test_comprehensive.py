@@ -128,7 +128,7 @@ def test_model_lightning_direct_dataloaders():
 def test_model_keras_mode():
     net = paddle.nn.Sequential(paddle.nn.Linear(10, 20), paddle.nn.ReLU(), paddle.nn.Linear(20, 2))
     model = ocean.Model(model=net)
-    model.compile(
+    model.prepare(
         optimizer=paddle.optimizer.SGD(learning_rate=0.01, parameters=net.parameters()),
         loss=paddle.nn.CrossEntropyLoss(),
     )
@@ -435,7 +435,7 @@ def test_multi_epoch_validation():
 def test_keras_evaluate():
     net = paddle.nn.Sequential(paddle.nn.Linear(10, 2))
     model = ocean.Model(model=net)
-    model.compile(
+    model.prepare(
         optimizer=paddle.optimizer.SGD(learning_rate=0.01, parameters=net.parameters()),
         loss=paddle.nn.CrossEntropyLoss(),
     )
