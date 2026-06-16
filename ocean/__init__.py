@@ -39,6 +39,13 @@ warnings.filterwarnings(
     module="paddle.nn.layer.norm",
 )
 
+# Suppress PIR "no place interface" false positive (CINN static graph mode)
+warnings.filterwarnings(
+    "ignore",
+    message=".*do not have 'place' interface for pir graph mode.*",
+    category=UserWarning,
+)
+
 # ====================================================================
 # Auto device detection — set best available device on import
 # ====================================================================
