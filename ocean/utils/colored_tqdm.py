@@ -54,11 +54,37 @@ class ColoredTqdm(tqdm):
         *args,
         start_color=(221, 160, 160),  # RGB: #DDA0A0
         end_color=(160, 221, 160),  # RGB: #A0DDA0
+        desc_max_width: int = 30,  # max width for desc text; long descs scroll
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        # Set attrs BEFORE super().__init__() so display() can read them
         self.start_color = start_color
         self.end_color = end_color
+        self.desc_max_width = desc_max_width
+        self._full_desc = kwargs.get("desc", args[1] if len(args) > 1 else "") or ""
+        self._scroll_interval = 2
+        self._scroll_counter = 0
+        self._scroll_offset = 0
+        self._needs_scroll = len(self._full_desc) > desc_max_width
+
+        super().__init__(*args, **kwargs)
+
+    def _make_bar_format(self) -> str:
+        """Build bar_format with pinned desc width and color."""
+        style = hex_to_ansi(self.get_current_color())
+        return f"{{desc:{self.desc_max_width}}}{{percentage:3.0f}}%|{style}{{bar}}{hex_to_ansi.reset}|{{r_bar}}"
+
+    def _get_scrolled_desc(self) -> str:
+        """Return the current visible window of the description (marquee)."""
+        if not self._needs_scroll:
+            return self._full_desc.ljust(self.desc_max_width)
+        end = self._scroll_offset + self.desc_max_width
+        if end <= len(self._full_desc):
+            return self._full_desc[self._scroll_offset : end]
+        # Wrap around: tail + gap + head
+        tail = self._full_desc[self._scroll_offset :]
+        head = self._full_desc[: end - len(self._full_desc)]
+        return (tail + " " + head).ljust(self.desc_max_width)
 
     def get_current_color(self):
 
@@ -72,8 +98,17 @@ class ColoredTqdm(tqdm):
         result = current_rgb[0] * 16**4 + current_rgb[1] * 16**2 + current_rgb[2] * 16**0
         return "%06x" % result
 
+    def display(self, msg=None, pos=None):
+        # Advance marquee scroll on every display call
+        if self._needs_scroll:
+            self._scroll_counter += 1
+            if self._scroll_counter >= self._scroll_interval:
+                self._scroll_counter = 0
+                self._scroll_offset = (self._scroll_offset + 1) % len(self._full_desc)
+            self.desc = self._get_scrolled_desc()
+        self.bar_format = self._make_bar_format()
+        super().display(msg, pos)
+
     def update(self, n=1):
+        # parent's update() calls display() internally, which our override handles
         super().update(n)
-        style = hex_to_ansi(self.get_current_color())
-        self.bar_format = f"{{l_bar}}{style}{{bar}}{hex_to_ansi.reset}{{r_bar}}"
-        self.refresh()

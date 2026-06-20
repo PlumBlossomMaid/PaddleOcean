@@ -67,10 +67,10 @@ upload_file() → upload_folder()
        │    1. SHA256 计算（ColoredTqdm 进度条）
        │    2. LFS batch API  → 获取 pre-signed URL
        │    3. BOS 上传       → HTTP PUT 到 pre-signed URL（ColoredTqdm 进度条，适配任意大小）
-       │    4. 指针提交       → POST/PUT Gitea contents API
+       │    4. 指针提交       → POST/PUT Gitea contents API（串行锁）
        └─ Normal (<5MB) → _regular_upload_file()
             1. base64 编码
-            2. POST/PUT Gitea contents API
+            2. POST/PUT Gitea contents API（串行锁）
 ```
 
 ### 关键设计决策
@@ -82,6 +82,8 @@ upload_file() → upload_folder()
 | `_check_file_exists` 直接调 `requests.get` | 404 是「文件不存在」的正常情况，不是错误 |
 | LFS 指针提交与内容上传解耦 | 内容 hash 已在 BOS 存在时仍需提交指针到仓库 |
 | `future.result()` 收集异常 | 防止线程池异常被静默吞没 |
+| **Gitea API 串行锁（`_gitea_lock`）** | Gitea API 扛不住并发请求（返回 500），BOS 上传可并行，Gitea 调用串行化 |
+| **文件名滚动（`desc_max_width=30`）** | 长文件名在定宽区域横向滚动，避免进度条被挤压 |
 
 ### 一点必须牢记
 
@@ -101,8 +103,18 @@ headers = {
 from ocean.utils.colored_tqdm import ColoredTqdm
 
 with ColoredTqdm(total=file_size, unit="B", unit_scale=True,
-                 desc="  ☁️  file.zip", leave=False) as pbar:
+                 desc="  ☁️  file.zip", leave=True) as pbar:
     pbar.update(chunk_size)
 ```
 
-颜色从粉色 (`#DDA0A0`) 渐变到绿色 (`#A0DDA0`)，进度越高越绿。
+颜色从粉色 (`#DDA0A0`) 渐变到绿色 (`#A0DDA0`)，进度越高越绿。默认 `desc_max_width=30`，超出该长度的描述会横向循环滚动显示；BOS 上传进度条 `leave=True` 保持终端滚动历史。
+
+### 并发与稳定性
+
+```bash
+# 单线程——最稳定，适合大批量上传
+ocean cloud upload user/repo ./data/ --max-workers 1
+
+# 多线程——BOS 上传并行，Gitea API 被线程锁串行化，不会 500
+ocean cloud upload user/repo ./data/ --max-workers 8
+```

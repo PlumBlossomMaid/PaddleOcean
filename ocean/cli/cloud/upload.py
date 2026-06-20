@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -29,6 +30,10 @@ import requests
 from ocean.cli.cloud import _config
 from ocean.cli.cloud.auth import get_token
 from ocean.utils.colored_tqdm import ColoredTqdm
+
+# ── Gitea API serialization ─────────────────────────────────────────
+# Gitea returns 500 under concurrent requests; serialize all API calls.
+_gitea_lock = threading.Lock()
 
 __all__ = ["upload"]
 
@@ -338,7 +343,7 @@ def _header_fill(token: str, extra: Optional[dict] = None) -> dict:
 
 
 def _git_api(method: str, path: str, token: str, data=None, content_type: Optional[str] = None) -> dict:
-    """Call AI Studio Gitea API."""
+    """Call AI Studio Gitea API (serialized via module-level lock)."""
     host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
     url = f"{host}{path}"
     headers = _header_fill(token)
@@ -346,7 +351,8 @@ def _git_api(method: str, path: str, token: str, data=None, content_type: Option
         headers["Content-Type"] = content_type
         headers["Accept"] = content_type
     body = json.dumps(data) if data is not None else None
-    resp = requests.request(method, url, headers=headers, data=body, timeout=30)
+    with _gitea_lock:
+        resp = requests.request(method, url, headers=headers, data=body, timeout=30)
     if resp.status_code in (200, 201):
         return resp.json()
     raise click.ClickException(f"Git API error [{resp.status_code}]: {resp.text[:200]}")
@@ -356,7 +362,8 @@ def _check_file_exists(repo_id: str, path_in_repo: str, revision: str, token: st
     """Check if a file exists in the repo, return sha if it does."""
     host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
     url = f"{host}/api/v1/repos/{repo_id}/contents/{path_in_repo}?ref={revision}"
-    resp = requests.get(url, headers=_header_fill(token), timeout=30)
+    with _gitea_lock:
+        resp = requests.get(url, headers=_header_fill(token), timeout=30)
     if resp.status_code == 200:
         data = resp.json()
         if isinstance(data, dict) and "sha" in data:
