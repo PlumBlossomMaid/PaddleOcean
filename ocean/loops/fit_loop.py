@@ -67,6 +67,14 @@ class _FitLoop(_Loop):
                 # Training step
                 result = model.training_step(batch, batch_idx)
 
+                # Periodic logger flush — use current step (before increment)
+                # so step 0 (0 % N == 0) triggers correctly and the interval
+                # matches the config value.
+                if trainer.dataloader_step % max(1, trainer.log_every_n_steps) == 0:
+                    trainer._logger_connector.log_metrics(
+                        trainer.logged_metrics, trainer.dataloader_step
+                    )
+
                 # Skip automatic backward/optimizer when manual optimization is used
                 # (model handles backward and step inside training_step)
                 if model.automatic_optimization:
@@ -99,17 +107,15 @@ class _FitLoop(_Loop):
                             trainer._optimizers[0].clear_grad()
                             opt_acc = 0
                             trainer._dataloader_step += 1
+                            trainer._optimizer_step += 1
                 else:
                     # Manual optimization: model handles backward/step inside training_step.
-                    # Track batch count for max_steps and logger flush.
+                    # Track batch count for max_steps, logger flush and optimizer steps.
                     trainer._dataloader_step += 1
+                    trainer._optimizer_step += 1
 
                 model.on_train_batch_end(result, batch, batch_idx)
                 _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
-
-                # Periodic logger flush (every log_every_n_steps)
-                if trainer.dataloader_step % max(1, trainer.log_every_n_steps) == 0:
-                    trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
 
                 # Step-based validation check (ocean-compatible)
                 if trainer._should_check_val_step(trainer.dataloader_step):
@@ -133,6 +139,7 @@ class _FitLoop(_Loop):
                 _call_callback_hooks(trainer, "on_before_zero_grad", trainer._optimizer)
                 trainer._optimizer.clear_grad()
                 trainer._dataloader_step += 1
+                trainer._optimizer_step += 1
 
             # On epoch end
             trainer._compute_epoch_metrics()
@@ -182,6 +189,11 @@ class _FitLoop(_Loop):
                     _call_callback_hooks(trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0)
 
         trainer._compute_epoch_metrics()
+        # Flush validation metrics to logger (VisualDL/TensorBoard) immediately
+        # so val/* tags appear in VDL (Lightning: eval loop calls log_metrics internally)
+        trainer._logger_connector.log_metrics(
+            trainer.logged_metrics, trainer.dataloader_step
+        )
         _call_module_hook(trainer, "on_validation_epoch_end")
         _call_callback_hooks(trainer, "on_validation_epoch_end")
         _call_module_hook(trainer, "on_validation_end")

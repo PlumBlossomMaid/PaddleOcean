@@ -520,8 +520,9 @@ class Trainer:
                 value = self.strategy.reduce(paddle.to_tensor(value), reduce_op="mean", group=sync_dist_group)
                 if hasattr(value, "item"):
                     value = value.item()
-            except Exception:
-                pass
+            except Exception as e:
+                import warnings
+                warnings.warn(f"sync_dist reduce failed: {e}")
 
         # Handle rank_zero_only: skip logging on non-zero ranks
         if rank_zero_only and not self.is_global_zero:
@@ -621,13 +622,22 @@ class Trainer:
         return False
 
     def _sanity_check(self, model: Any, device: Any) -> None:
-        """Run sanity check (progress via TQDMProgressBar hooks)."""
+        """Run sanity check — aligned with Lightning behavior.
+
+        - Calls ``on_sanity_check_start/end`` (NOT ``on_validation_start/end``).
+        - Resets logged metrics before/after so ``val/loss`` does not leak
+          into training step-0 log flushes.
+        - Does NOT call ``empty_cache()`` (Lightning doesn't either; any
+          memory issue is a real leak that must be fixed at the root).
+        """
         from ocean.trainer.call import _call_callback_hooks
+
+        # Reset metrics before sanity check (Lightning-style)
+        self._logger_connector.reset_validation_metrics()
 
         self.sanity_checking = True
         model.eval()
         try:
-            _call_callback_hooks(self, "on_validation_start")
             _call_callback_hooks(self, "on_sanity_check_start")
             for dataloader in self.val_dataloaders:
                 count = 0
@@ -641,10 +651,12 @@ class Trainer:
                         _call_callback_hooks(self, "on_validation_batch_end", None, batch, batch_idx, dataloader_idx=0)
                         count += 1
         finally:
-            _call_callback_hooks(self, "on_validation_end")
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
-            model.train()  # restore train mode after sanity check (fix: BN/Dropout)
+            model.train()  # restore train mode after sanity check
+            # Reset metrics again after sanity check (Lightning-style)
+            # so val/* metrics don't pollute training step-0 log flushes
+            self._logger_connector.reset_validation_metrics()
 
     def _teardown(self) -> None:
         self.strategy.teardown()
