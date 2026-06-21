@@ -100,12 +100,13 @@ class _FitLoop(_Loop):
                             model.on_before_optimizer_step(trainer._optimizer)
                             _call_callback_hooks(trainer, "on_before_optimizer_step", trainer._optimizer)
                             trainer._optimizers[0].step()
+                            # optimizer_step auto-incremented by
+                            # OceanOptimizer._on_after_step hook
                             model.on_before_zero_grad(trainer._optimizer)
                             _call_callback_hooks(trainer, "on_before_zero_grad", trainer._optimizer)
                             trainer._optimizers[0].clear_grad()
                             opt_acc = 0
                             trainer._dataloader_step += 1
-                            trainer._optimizer_step += 1
                 else:
                     # Manual optimization: model handles backward/step inside training_step.
                     # Track batch count for max_steps, logger flush and optimizer steps.
