@@ -62,6 +62,10 @@ if _paddle.is_compiled_with_cuda():
 # ====================================================================
 # Compat-wrapped APIs
 # ====================================================================
+# ====================================================================
+# Paddle SOT compatibility patch
+# ====================================================================
+from ocean._compat.sot import patch_sot as _patch_sot
 from ocean._compat.tensor import (
     argsort,
     index_add,
@@ -127,6 +131,8 @@ from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerS
 from ocean.utils.enums import OceanEnum
 from ocean.utils.seed import seed_everything
 from ocean.utils.types import EVALUATE_OUTPUT, PREDICT_OUTPUT, STEP_OUTPUT
+
+_patch_sot()
 
 __version__ = "0.1.0"
 
