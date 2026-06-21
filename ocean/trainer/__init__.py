@@ -640,6 +640,11 @@ class Trainer:
         model.eval()
         try:
             _call_callback_hooks(self, "on_sanity_check_start")
+            # Call on_validation_start/epoch_end hooks, matching
+            # Lightning's val_loop.run which calls _on_evaluation_start
+            # before batches and _on_evaluation_epoch_end after.
+            _call_module_hook(self, "on_validation_start")
+            _call_callback_hooks(self, "on_validation_start")
             for dataloader in self.val_dataloaders:
                 count = 0
                 with paddle.no_grad():
@@ -651,6 +656,8 @@ class Trainer:
                         model.validation_step(batch, batch_idx)
                         _call_callback_hooks(self, "on_validation_batch_end", None, batch, batch_idx, dataloader_idx=0)
                         count += 1
+            _call_module_hook(self, "on_validation_epoch_end")
+            _call_callback_hooks(self, "on_validation_epoch_end")
         finally:
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
