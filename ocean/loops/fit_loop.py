@@ -71,9 +71,7 @@ class _FitLoop(_Loop):
                 # so step 0 (0 % N == 0) triggers correctly and the interval
                 # matches the config value.
                 if trainer.dataloader_step % max(1, trainer.log_every_n_steps) == 0:
-                    trainer._logger_connector.log_metrics(
-                        trainer.logged_metrics, trainer.dataloader_step
-                    )
+                    trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
 
                 # Skip automatic backward/optimizer when manual optimization is used
                 # (model handles backward and step inside training_step)
@@ -191,9 +189,7 @@ class _FitLoop(_Loop):
         trainer._compute_epoch_metrics()
         # Flush validation metrics to logger (VisualDL/TensorBoard) immediately
         # so val/* tags appear in VDL (Lightning: eval loop calls log_metrics internally)
-        trainer._logger_connector.log_metrics(
-            trainer.logged_metrics, trainer.dataloader_step
-        )
+        trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
         _call_module_hook(trainer, "on_validation_epoch_end")
         _call_callback_hooks(trainer, "on_validation_epoch_end")
         _call_module_hook(trainer, "on_validation_end")

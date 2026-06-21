@@ -522,6 +522,7 @@ class Trainer:
                     value = value.item()
             except Exception as e:
                 import warnings
+
                 warnings.warn(f"sync_dist reduce failed: {e}")
 
         # Handle rank_zero_only: skip logging on non-zero ranks
