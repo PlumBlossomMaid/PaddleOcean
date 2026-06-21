@@ -695,7 +695,7 @@ def _upload_item(
 
 @click.command()
 @click.argument("repo_id")
-@click.argument("local_path", type=click.Path(exists=True))
+@click.argument("local_paths", nargs=-1, type=click.Path(exists=True))
 @click.option("--path-in-repo", default=None, help="Target path in repo.")
 @click.option("--repo-type", type=click.Choice(["model", "dataset"]), default="dataset")
 @click.option("--revision", default="master", help="Branch name.")
@@ -704,7 +704,7 @@ def _upload_item(
 @click.option("--commit-message", default=None, help="Commit message.")
 def upload(
     repo_id: str,
-    local_path: str,
+    local_paths: tuple[str, ...],
     path_in_repo: Optional[str],
     repo_type: str,
     revision: str,
@@ -712,21 +712,24 @@ def upload(
     max_workers: int,
     commit_message: Optional[str],
 ):
-    """Upload a file or folder to AI Studio.
+    """Upload file(s) or folder(s) to AI Studio.
 
     REPO_ID: Format ``username/repo-name``.
 
-    LOCAL_PATH: Path to a local file or folder to upload.
+    LOCAL_PATHS: One or more local files or folders to upload.
+                   Pass multiple paths separated by spaces.
 
     Examples:
 
         ocean cloud upload PlumBlossom/MyDataset ./data.zip
 
+        ocean cloud upload PlumBlossom/MyDataset ./part1.zip ./part2.zip ./part3.zip
+
         ocean cloud upload PlumBlossom/MyModel ./checkpoints/ --repo-type model
     """
     upload_folder(
         repo_id=repo_id,
-        local_path=local_path,
+        local_paths=local_paths,
         path_in_repo=path_in_repo,
         repo_type=repo_type,
         revision=revision,
@@ -764,7 +767,7 @@ def upload_file(
     """
     upload_folder(
         repo_id=repo_id,
-        local_path=local_path,
+        local_paths=[local_path],
         path_in_repo=path_in_repo,
         repo_type=repo_type,
         revision=revision,
@@ -776,7 +779,7 @@ def upload_file(
 
 def upload_folder(
     repo_id: str,
-    local_path: str,
+    local_paths: str | list[str] | tuple[str, ...],
     path_in_repo: Optional[str] = None,
     repo_type: str = "dataset",
     revision: str = "master",
@@ -784,11 +787,11 @@ def upload_folder(
     max_workers: int = 4,
     commit_message: Optional[str] = None,
 ) -> None:
-    """Upload a file or folder to AI Studio.
+    """Upload file(s) or folder(s) to AI Studio.
 
     Args:
         repo_id: ``username/repo-name``.
-        local_path: Path to local file or directory.
+        local_paths: One or more local files or directories to upload.
         path_in_repo: Target path in the repo.
         repo_type: ``"dataset"`` or ``"model"``.
         revision: Branch name.
@@ -798,21 +801,26 @@ def upload_folder(
 
     Examples:
         >>> upload_folder("PlumBlossom/MyData", "./data_dir/")
+        >>> upload_folder("PlumBlossom/MyData", ["./part1.zip", "./part2.zip"])
     """
+    if isinstance(local_paths, str):
+        local_paths = [local_paths]
+
     token = token or get_token()
     _config.validate_repo_id(repo_id)
 
-    p = Path(local_path)
-    if p.is_file():
-        items = [(path_in_repo or p.name, str(p))]
-    else:
-        items = []
-        prefix = (path_in_repo or "").strip("/")
-        prefix = f"{prefix}/" if prefix else ""
-        for f in sorted(p.rglob("*")):
-            if f.is_file() and not f.name.startswith("."):
-                rel = f.relative_to(p).as_posix()
-                items.append((prefix + rel, str(f)))
+    items: list[tuple[str, str]] = []
+    for lp in local_paths:
+        p = Path(lp)
+        if p.is_file():
+            items.append((path_in_repo or p.name, str(p)))
+        else:
+            prefix = (path_in_repo or "").strip("/")
+            prefix = f"{prefix}/" if prefix else ""
+            for f in sorted(p.rglob("*")):
+                if f.is_file() and not f.name.startswith("."):
+                    rel = f.relative_to(p).as_posix()
+                    items.append((prefix + rel, str(f)))
 
     click.echo(f"  Uploading {len(items)} file(s) to {repo_id}...")
     errors = []
