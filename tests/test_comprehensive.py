@@ -248,7 +248,7 @@ def test_model_checkpoint():
         ckpt = ocean.ModelCheckpoint(dirpath=tmpdir, save_last=True, verbose=False)
         trainer = ocean.Trainer(max_epochs=2, callbacks=[ckpt], verbose=0)
         trainer.fit(model, train_dataloaders=make_train_loader(20, 8))
-        last_path = os.path.join(tmpdir, "last.ckpt")
+        last_path = os.path.join(tmpdir, "last.pdparams")
         assert os.path.exists(last_path), f"Checkpoint not found at {last_path}"
 
 

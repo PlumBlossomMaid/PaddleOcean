@@ -17,7 +17,7 @@ class ModelCheckpoint(Callback):
             Default: ``'{epoch}-{step}'``.
         monitor: Metric to monitor for saving.
         verbose: If True, prints save messages.
-        save_last: If True, always saves a 'last.ckpt'.
+        save_last: If True, always saves a 'last.pdparams'.
         save_top_k: Number of best models to keep (k) or -1 for all.
         mode: ``'min'`` or ``'max'`` (direction for monitor comparison).
         save_weights_only: If True, saves only model weights (not optimizer state).

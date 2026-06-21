@@ -176,6 +176,19 @@ trainer.fit(model, train_loader)
 - **GPU 测试**：在本地 Linux 环境手动执行
 - **跳过条件**：draft PR 不触发
 
+## Training Behavior（训练行为详解）
+
+详见 `.qwen/training-behavior.md`，涵盖：
+
+- Sanity Check 行为（`_sanity_check()` 流程步骤）
+- 训练循环（FitLoop）中的日志 flush 时机
+- 验证流程（`_run_validation`）中的 metrics flush 与重置
+- LoggerConnector 的 `reset_validation_metrics()` 原理
+- VisualDLLogger 的 `version="latest"` 模式
+- SOT KeyError 'self' 补丁机制
+- 手动优化（`automatic_optimization=False`）的处理
+- 常见 VDL 日志问题排查
+
 ## 本地验证
 
 ```bash
