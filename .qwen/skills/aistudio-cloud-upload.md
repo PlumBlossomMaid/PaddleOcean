@@ -97,6 +97,19 @@ headers = {
 ```
 漏掉 Accept 头会返回 `415 Unsupported Media Type`。
 
+### 自动重试机制
+
+网络错误（timeout / connection / SSL）和 Gitea 500 会自动重试。
+
+| 位置 | 触发条件 | 最大重试 | 退避策略 |
+|------|---------|---------|---------|
+| `_git_api()` | Timeout / ConnectionError / SSLError / HTTP 500 | 3 次 | 指数退避 2^attempt，上限 30s |
+| `_check_file_exists()` | Timeout / ConnectionError / SSLError | 3 次 | 同上 |
+| `_http_put()` (BOS 上传) | Timeout / ConnectionError / SSLError | 3 次 | 同上 |
+| `_sts_multipart_upload` (分片) | 分片上传任意异常 | 5 次 | 同上，上限 30s |
+
+客户端不需要任何配置，网络抖动时自动重试，失败 3 次后才会报错退出。
+
 ### 彩虹进度条
 
 ```python

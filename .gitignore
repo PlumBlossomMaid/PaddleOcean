@@ -31,3 +31,6 @@ dist/
 build/
 *.egg-info/
 *.ckpt
+
+# Qwen Code memory (agent-internal, not project-owned)
+memory/
