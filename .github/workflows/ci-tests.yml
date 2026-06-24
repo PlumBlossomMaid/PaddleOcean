@@ -152,7 +152,7 @@ jobs:
       - name: Install paddlemetrics (metrics dependency)
         run: |
           git clone --depth 1 https://github.com/PlumBlossomMaid/PaddleMetrics.git /tmp/PaddleMetrics
-          pip install /tmp/PaddleMetrics
+          pip install /tmp/PaddleMetrics[classification]
 
       - name: Verify all imports
         run: |
