@@ -1,4 +1,4 @@
-"""Conditional test skipping utilities.
+"""Testing utilities: conditional skipping, dtype-aware tolerances.
 
 Analogous to ocean's testing/_runif.py.
 
@@ -8,10 +8,94 @@ Usage::
 
     @skip_on_custom_device(["iluvatar_gpu"])
     def test_float64_audio(): ...
+
+    rtol, atol = default_tolerances(paddle.float32)
+    assert_close(actual, expected, rtol=rtol, atol=atol)
 """
 
 import functools
 from typing import Any, Callable, Optional
+
+import numpy as np
+import paddle
+
+# ====================================================================
+# Dtype-aware default tolerances
+# ====================================================================
+# Reference: PyTorch torch.testing._comparison._DTYPE_PRECISIONS
+# https://github.com/pytorch/pytorch/blob/main/torch/testing/_comparison.py
+#
+# {dtype: (rtol, atol)}
+_DTYPE_PRECISIONS: dict[paddle.dtype, tuple[float, float]] = {
+    paddle.float16: (0.001, 1e-5),
+    paddle.bfloat16: (0.016, 1e-5),
+    paddle.float32: (1.3e-6, 1e-5),
+    paddle.float64: (1e-7, 1e-7),
+    paddle.complex64: (1.3e-6, 1e-5),
+    paddle.complex128: (1e-7, 1e-7),
+}
+
+
+def default_tolerances(
+    *dtypes: paddle.dtype,
+) -> tuple[float, float]:
+    """Return the loosest (rtol, atol) across the given dtypes.
+
+    Args:
+        *dtypes: One or more Paddle dtypes. The returned tolerances are the
+            loosest (largest) among all specified dtypes.
+
+    Returns:
+        Tuple of ``(relative_tolerance, absolute_tolerance)``.
+    """
+    rtol, atol = 0.0, 0.0
+    for dtype in dtypes:
+        r, a = _DTYPE_PRECISIONS.get(dtype, (1e-7, 1e-7))
+        rtol = max(rtol, r)
+        atol = max(atol, a)
+    return rtol, atol
+
+
+def assert_close(
+    actual: np.ndarray,
+    expected: np.ndarray,
+    *,
+    rtol: float | None = None,
+    atol: float | None = None,
+    dtype: paddle.dtype | None = None,
+    msg: str = "",
+) -> None:
+    """Assert that two numpy arrays are close, with dtype-aware defaults.
+
+    When ``rtol`` / ``atol`` are not specified, they are inferred from
+    ``dtype`` via :func:`default_tolerances`. If ``dtype`` is also
+    ``None``, common dtypes between the two arrays are used.
+
+    Args:
+        actual: Computed result (numpy array).
+        expected: Reference result (numpy array).
+        rtol: Relative tolerance. If ``None``, inferred from dtype.
+        atol: Absolute tolerance. If ``None``, inferred from dtype.
+        dtype: Data type for tolerance lookup. If ``None``, inferred from
+            ``actual`` and ``expected`` dtypes.
+        msg: Optional error message prefix.
+    """
+    if dtype is None:
+        common = np.result_type(actual.dtype, expected.dtype)
+        if common == np.float64:
+            dtype = paddle.float64
+        elif common == np.float32:
+            dtype = paddle.float32
+        else:
+            dtype = paddle.float64
+
+    if rtol is None or atol is None:
+        r, a = default_tolerances(dtype)
+        rtol = rtol if rtol is not None else r
+        atol = atol if atol is not None else a
+
+    np.testing.assert_allclose(actual, expected, rtol=rtol, atol=atol, err_msg=msg)
+
 
 # Devices known to have limited float64 kernel support.
 # These are domestic AI accelerators whose PaddlePaddle plugins may not
