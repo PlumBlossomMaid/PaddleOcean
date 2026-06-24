@@ -17,6 +17,7 @@ import unittest
 import librosa
 import numpy as np
 import paddle
+from conftest import blacklist_skip_msg, in_device_blacklist
 from parameterized import parameterized
 from scipy import signal
 
@@ -27,6 +28,7 @@ def parameterize(*params):
     return parameterized.expand(list(itertools.product(*params)))
 
 
+@unittest.skipIf(in_device_blacklist(), blacklist_skip_msg())
 class TestAudioFunctions(unittest.TestCase):
     def setUp(self):
         paddle.disable_static()

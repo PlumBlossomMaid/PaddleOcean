@@ -31,6 +31,7 @@ import librosa
 import numpy as np
 import paddle
 import scipy
+from conftest import blacklist_skip_msg, in_device_blacklist
 from parameterized import parameterized
 
 from ocean._compat import audio as compat_audio
@@ -45,6 +46,7 @@ def _get_sine_wave(duration_sec=0.5, sr=16000, freq=440):
     return (np.sin(2 * np.pi * freq * t) * 0.1).astype(np.float64)
 
 
+@unittest.skipIf(in_device_blacklist(), blacklist_skip_msg())
 class TestAudioComponents(unittest.TestCase):
     """Component-level tests: STFT, window, mel filter bank, power_to_db, DCT."""
 

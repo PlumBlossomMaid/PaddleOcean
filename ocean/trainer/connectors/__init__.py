@@ -294,11 +294,24 @@ class _AcceleratorConnector:
 
     @staticmethod
     def _resolve_accelerator(accelerator: str) -> Any:
-        from ocean.accelerators import CPUAccelerator, CUDAAccelerator, IPUAccelerator, ROCmAccelerator, XPUAccelerator
+        from ocean.accelerators import (
+            CPUAccelerator,
+            CUDAAccelerator,
+            CustomDeviceAccelerator,
+            IPUAccelerator,
+            ROCmAccelerator,
+            XPUAccelerator,
+        )
 
         if accelerator in ("auto", "cpu"):
             if CUDAAccelerator.is_available():
                 return CUDAAccelerator()
+            if ROCmAccelerator.is_available():
+                return ROCmAccelerator()
+            if XPUAccelerator.is_available():
+                return XPUAccelerator()
+            if CustomDeviceAccelerator.is_available():
+                return CustomDeviceAccelerator()
             return CPUAccelerator()
         if accelerator == "gpu":
             if CUDAAccelerator.is_available():
@@ -310,6 +323,10 @@ class _AcceleratorConnector:
             return XPUAccelerator()
         if accelerator == "ipu":
             return IPUAccelerator()
+        if accelerator == "custom":
+            if CustomDeviceAccelerator.is_available():
+                return CustomDeviceAccelerator()
+            raise RuntimeError("custom accelerator requested but no custom device available")
         raise ValueError(f"Unknown accelerator: {accelerator}")
 
     @staticmethod

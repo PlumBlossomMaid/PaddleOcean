@@ -5,11 +5,22 @@ Analogous to ocean's testing/_runif.py.
 Usage::
     @RunIf(min_cuda_version="11.0")
     def test_cuda_feature(): ...
+
+    @skip_on_custom_device(["iluvatar_gpu"])
+    def test_float64_audio(): ...
 """
 
 import functools
-import os
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
+
+# Devices known to have limited float64 kernel support.
+# These are domestic AI accelerators whose PaddlePaddle plugins may not
+# implement all float64 operations (e.g. contiguous, STFT internals).
+# We track specific gaps and plan to upstream fixes to PaddlePaddle.
+# See: .qwen/iluvatar-unsupported-kernels.md
+_UNSUPPORTED_FLOAT64_DEVICES = {
+    "iluvatar_gpu",  # 天数智芯 — missing float64 contiguous kernel in complex graphs
+}
 
 
 class RunIf:
@@ -59,3 +70,46 @@ class RunIf:
             return fn(*args, **kwargs)
 
         return wrapper
+
+
+def skip_on_custom_device(
+    device_types: Optional[list[str]] = None,
+    reason: str = "Test incompatible with current custom device",
+) -> Callable:
+    """Skip a test when running on specific custom (domestic) devices.
+
+    Use this for tests that rely on float64 operations or other features
+    not yet implemented in certain PaddlePaddle custom device plugins.
+
+    Args:
+        device_types: List of custom device type strings to skip on.
+            If ``None`` (default), skip on **any** registered custom device
+            (i.e. Iluvatar, Ascend NPU, Cambricon MLU, ...).
+        reason: Reason string passed to ``pytest.skip``.
+    """
+    if device_types is not None:
+        _targets = set(device_types)
+    else:
+        _targets = None
+
+    def decorator(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            import paddle
+
+            types = paddle.device.get_all_custom_device_type()
+            if not types:
+                return fn(*args, **kwargs)
+
+            current = types[0]
+            if _targets is None or current in _targets:
+                import pytest
+
+                pytest.skip(
+                    f"{reason} (device={current})"
+                )
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
