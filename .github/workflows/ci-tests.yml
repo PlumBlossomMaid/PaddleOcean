@@ -39,6 +39,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff==0.15.0 pre-commit
 
+      - name: Install paddlemetrics (metrics dependency)
+        run: |
+          git clone --depth 1 https://github.com/PlumBlossomMaid/PaddleMetrics.git /tmp/PaddleMetrics
+          pip install /tmp/PaddleMetrics
+
       - name: Run ruff check
         run: ruff check ocean/ tests/ --fix --exit-non-zero-on-fix
 
@@ -78,6 +83,11 @@ jobs:
       - name: Install test dependencies
         run: |
           pip install pytest pytest-timeout parameterized scipy librosa
+
+      - name: Install paddlemetrics (metrics dependency)
+        run: |
+          git clone --depth 1 https://github.com/PlumBlossomMaid/PaddleMetrics.git /tmp/PaddleMetrics
+          pip install /tmp/PaddleMetrics
 
       - name: Run core tests
         run: |
@@ -139,6 +149,11 @@ jobs:
         run: |
           pip install paddlepaddle
 
+      - name: Install paddlemetrics (metrics dependency)
+        run: |
+          git clone --depth 1 https://github.com/PlumBlossomMaid/PaddleMetrics.git /tmp/PaddleMetrics
+          pip install /tmp/PaddleMetrics[classification]
+
       - name: Verify all imports
         run: |
           python -c "
@@ -162,7 +177,12 @@ jobs:
           assert hasattr(ocean, 'OceanLogger')
           assert hasattr(ocean, 'OceanEnum')
           assert hasattr(ocean, 'seed_everything')
+          # Verify metrics module
+          assert hasattr(ocean, 'metrics')
+          from ocean.metrics import Metric, MetricCollection
+          from paddlemetrics import Accuracy
           print('All', len(ocean.__all__), 'exports verified OK')
+          print('Metrics: Metric, MetricCollection, Accuracy OK')
           "
 
       - name: Verify distributed module

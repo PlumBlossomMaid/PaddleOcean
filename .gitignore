@@ -33,3 +33,4 @@ build/
 *.ckpt
 *.pdparams
 ocean_logs/
+log/

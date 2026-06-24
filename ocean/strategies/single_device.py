@@ -31,6 +31,19 @@ class SingleDeviceStrategy(Strategy):
     def root_device(self) -> Any:
         return self._root_device
 
+    @root_device.setter
+    def root_device(self, device: Any) -> None:
+        self._root_device = device
+
+    @property
+    def parallel_devices(self) -> list[Any]:
+        return [self._root_device]
+
+    @parallel_devices.setter
+    def parallel_devices(self, devices: list[Any]) -> None:
+        if devices:
+            self._root_device = devices[0]
+
     @property
     def is_global_zero(self) -> bool:
         return True

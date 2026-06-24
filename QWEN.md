@@ -145,6 +145,17 @@ trainer.fit(model, train_loader)
 - **钩子签名**：`(self, trainer, model, *args)` — trainer 和 model 总是前两个参数
 - **幂等性**：多次调用 `setup`/`teardown` 不应产生副作用
 
+### Metrics
+- **来源**：重导出自 `paddlemetrics`（对标 `torchmetrics`，从 TorchMetrics 移植）
+- **导入方式**：领域指标直接 `from paddlemetrics import Accuracy, ...`（对齐 Lightning 不重新导出的模式）
+- **核心类型**：`Metric`、`CompositionalMetric`、`MetricCollection` 在 `ocean.metrics` 中可用
+- **`self.log()` 集成**：传递 `Metric` 对象给 `self.log()` 时，框架自动：
+  - `on_step`：使用 `metric._forward_cache` 记录 batch 值
+  - `on_epoch`：调用 `metric.compute()` 获取 epoch 值
+  - `reduce_fx` 被忽略（Metric 自行处理归约）——对齐 Lightning
+  - 分布式同步由 `paddlemetrics.Metric.sync()` 内部处理
+- **多卡**：每个 Metric 内置 `dist_sync_on_step` / `sync_on_compute` 控制
+
 ### Loggers
 - **路径结构**：`{root_dir}/{name}/version_{N}/metrics.csv`
 - **Ocean 特有**：`VisualDLLogger`（VisualDL）、`OceanLogger`（统一包装）

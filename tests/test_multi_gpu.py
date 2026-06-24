@@ -8,6 +8,11 @@ Test categories:
 Multi-GPU tests use ``paddle.distributed.spawn`` internally (no
 ``OCEAN_RUN_STANDALONE_TESTS`` needed).  They only run on machines
 with 2+ CUDA GPUs.
+
+NOTE: `import ocean` and `import paddle` are NOT at module level here
+because ``paddle.distributed.spawn`` re-imports this module in subprocesses,
+and ``import paddle`` at module-import time creates a CUDA context *before*
+the spawn helper sets ``FLAGS_selected_gpus``, causing ``cuBLAS`` errors.
 """
 
 import os
@@ -541,8 +546,198 @@ class TestGearMultiDevice:
 
 
 # ====================================================================
-# 7. RunIf helper unit tests
+# 6. Multi-GPU Metrics tests (paddlemetrics distributed sync)
 # ====================================================================
+
+
+class TestMultiGPUMetrics:
+    """Verify paddlemetrics distributed sync works in DDP mode.
+
+    paddlemetrics.Metric has built-in ``all_gather`` sync in ``compute()``.
+    These tests verify cross-rank consistency.
+    """
+
+    @staticmethod
+    def _run_metric_accuracy(tmp_path_str: str) -> None:
+        """DDP training with Accuracy metric logging."""
+        import os
+
+        rank = int(os.environ.get("LOCAL_RANK", 0))
+        ocean.seed_everything(42)
+
+        # Each rank produces identical data to verify sync
+        class SimpleModel(ocean.Model):
+            def __init__(self):
+                super().__init__()
+                self.net = ocean.nn.Linear(10, 2)
+                self.train_acc = ocean.metrics.Accuracy()
+
+            def forward(self, x):
+                return self.net(x)
+
+            def training_step(self, batch, batch_idx):
+                x, y = batch
+                preds = self(x)
+                loss = ocean.nn.functional.cross_entropy(preds, y.squeeze())
+                # Update metric and log the object reference
+                self.train_acc(preds, y.squeeze())
+                self.log("train_acc", self.train_acc, on_step=True, on_epoch=True)
+                return loss
+
+            def configure_optimizers(self):
+                return ocean.optimizer.SGD(learning_rate=0.01, parameters=self.parameters())
+
+        import paddle
+
+        x = paddle.randn([64, 10])
+        y = paddle.randint(0, 2, [64])
+        dataset = paddle.io.TensorDataset([x, y])
+        loader = paddle.io.DataLoader(dataset, batch_size=8)
+
+        model = SimpleModel()
+        trainer = ocean.Trainer(
+            accelerator="gpu",
+            strategy="ddp",
+            devices=2,
+            max_epochs=1,
+            enable_progress_bar=False,
+            log_every_n_steps=999,
+            default_root_dir=tmp_path_str,
+        )
+        trainer.fit(model, loader)
+
+        # Verify epoch metric is computed and valid
+        assert "train_acc" in trainer._log_metrics_on_epoch, f"Rank {rank}: train_acc not found in epoch metrics"
+        acc = trainer._log_metrics_on_epoch["train_acc"]
+        assert 0.0 <= acc <= 1.0, f"Rank {rank}: accuracy {acc} out of range"
+
+    @staticmethod
+    def _run_metric_mean_sync(tmp_path_str: str) -> None:
+        """DDP: verify MeanMetric syncs correctly across ranks."""
+        import os
+
+        rank = int(os.environ.get("LOCAL_RANK", 0))
+        ocean.seed_everything(42)
+
+        class SimpleModel(ocean.Model):
+            def __init__(self):
+                super().__init__()
+                self.net = ocean.nn.Linear(10, 2)
+                # Each rank accumulates its own metric
+                self.mean_metric = ocean.metrics.MeanMetric()
+
+            def forward(self, x):
+                return self.net(x)
+
+            def training_step(self, batch, batch_idx):
+                x, y = batch
+                preds = self(x)
+                loss = ocean.nn.functional.cross_entropy(preds, y.squeeze())
+                # Each rank logs its loss into a shared mean metric
+                self.mean_metric.update(loss.detach())
+                self.log("mean_loss", self.mean_metric, on_step=False, on_epoch=True)
+                return loss
+
+            def configure_optimizers(self):
+                return ocean.optimizer.SGD(learning_rate=0.01, parameters=self.parameters())
+
+        import paddle
+
+        x = paddle.randn([64, 10])
+        y = paddle.randint(0, 2, [64])
+        dataset = paddle.io.TensorDataset([x, y])
+        loader = paddle.io.DataLoader(dataset, batch_size=8)
+
+        model = SimpleModel()
+        trainer = ocean.Trainer(
+            accelerator="gpu",
+            strategy="ddp",
+            devices=2,
+            max_epochs=1,
+            enable_progress_bar=False,
+            log_every_n_steps=999,
+            default_root_dir=tmp_path_str,
+        )
+        trainer.fit(model, loader)
+
+        assert "mean_loss" in trainer._log_metrics_on_epoch
+        loss_val = trainer._log_metrics_on_epoch["mean_loss"]
+        assert loss_val > 0.0
+
+    @staticmethod
+    def _run_metric_collection_sync(tmp_path_str: str) -> None:
+        """DDP: verify MetricCollection works with sync across ranks."""
+        import os
+
+        rank = int(os.environ.get("LOCAL_RANK", 0))
+        ocean.seed_everything(42)
+
+        class SimpleModel(ocean.Model):
+            def __init__(self):
+                super().__init__()
+                self.net = ocean.nn.Linear(10, 2)
+                self.metrics = ocean.metrics.MetricCollection([
+                    ocean.metrics.Accuracy(),
+                    ocean.metrics.Precision(num_classes=2),
+                ])
+
+            def forward(self, x):
+                return self.net(x)
+
+            def training_step(self, batch, batch_idx):
+                x, y = batch
+                preds = self(x)
+                loss = ocean.nn.functional.cross_entropy(preds, y.squeeze())
+                # MetricCollection forward returns dict
+                self.metrics(preds, y.squeeze())
+                # Log individual metrics from the collection
+                self.log("acc", self.metrics["Accuracy"], on_step=True, on_epoch=True)
+                self.log("prec", self.metrics["Precision"], on_step=True, on_epoch=True)
+                return loss
+
+            def configure_optimizers(self):
+                return ocean.optimizer.SGD(learning_rate=0.01, parameters=self.parameters())
+
+        import paddle
+
+        x = paddle.randn([64, 10])
+        y = paddle.randint(0, 2, [64])
+        dataset = paddle.io.TensorDataset([x, y])
+        loader = paddle.io.DataLoader(dataset, batch_size=8)
+
+        model = SimpleModel()
+        trainer = ocean.Trainer(
+            accelerator="gpu",
+            strategy="ddp",
+            devices=2,
+            max_epochs=1,
+            enable_progress_bar=False,
+            log_every_n_steps=999,
+            default_root_dir=tmp_path_str,
+        )
+        trainer.fit(model, loader)
+
+        assert "acc" in trainer._log_metrics_on_epoch
+        assert "prec" in trainer._log_metrics_on_epoch
+        acc = trainer._log_metrics_on_epoch["acc"]
+        prec = trainer._log_metrics_on_epoch["prec"]
+        assert 0.0 <= acc <= 1.0
+        assert 0.0 <= prec <= 1.0
+
+    @RunIf(min_cuda_gpus=2)
+    def test_ddp_metric_accuracy(self, tmp_path):
+        """DDP: Accuracy metric syncs correctly across 2 GPUs."""
+        paddle.distributed.spawn(self._run_metric_accuracy, args=(str(tmp_path),), nprocs=2)
+
+    @RunIf(min_cuda_gpus=2)
+    def test_ddp_metric_mean_sync(self, tmp_path):
+        """DDP: MeanMetric syncs correctly across 2 GPUs."""
+        paddle.distributed.spawn(self._run_metric_mean_sync, args=(str(tmp_path),), nprocs=2)
+
+    @RunIf(min_cuda_gpus=2)
+    def test_ddp_metric_collection_sync(self, tmp_path):
+        """DDP: MetricCollection syncs correctly across 2 GPUs."""
+        paddle.distributed.spawn(self._run_metric_collection_sync, args=(str(tmp_path),), nprocs=2)
 
 
 class TestRunIfHelper:

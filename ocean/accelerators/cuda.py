@@ -18,6 +18,8 @@ class CUDAAccelerator(Accelerator):
         """
         if isinstance(device, paddle.CUDAPlace):
             idx = device.get_device_id()
+        elif isinstance(device, paddle.CPUPlace):
+            idx = 0
         else:
             idx = int(device) if device is not None else 0
         paddle.device.set_device(f"gpu:{idx}")
