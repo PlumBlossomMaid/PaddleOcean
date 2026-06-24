@@ -12,7 +12,10 @@ try:
     _HAS_PADDLEMETRICS = True
 except ImportError:
     PaddleMetric = type(None)  # placeholder, never matches isinstance
-    _pm_squeeze = lambda x: x
+
+    def _pm_squeeze(x):
+        return x
+
     _HAS_PADDLEMETRICS = False
 
 from ocean.strategies import SingleDeviceStrategy

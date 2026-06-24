@@ -11,15 +11,13 @@ import os
 import sys
 
 import paddle
-import pytest
+from paddlemetrics import Accuracy, MeanMetric, MetricCollection, Precision
 
 import ocean
-from paddlemetrics import Accuracy, MeanMetric, Metric, MetricCollection, Precision
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tests.helpers.runif import RunIf  # noqa: E402
-
 
 # ====================================================================
 # 1. Basic metric functionality (standalone, no Trainer)
@@ -76,12 +74,10 @@ class TestMetricBasic:
         preds = paddle.to_tensor([[0.2, 0.8], [0.7, 0.3], [0.1, 0.9], [0.5, 0.5]])
         target = paddle.to_tensor([1, 0, 1, 0])
 
-        metrics = MetricCollection(
-            [
-                Accuracy(task="multiclass", num_classes=2),
-                Precision(task="multiclass", num_classes=2),
-            ]
-        )
+        metrics = MetricCollection([
+            Accuracy(task="multiclass", num_classes=2),
+            Precision(task="multiclass", num_classes=2),
+        ])
         result = metrics(preds, target)
         assert "MulticlassAccuracy" in result, f"Keys: {list(result.keys())}"
         assert "MulticlassPrecision" in result
