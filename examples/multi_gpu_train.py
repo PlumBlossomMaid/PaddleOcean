@@ -112,7 +112,11 @@ def make_synthetic_data(batch_size=128, num_batches=100, image_size=128):
         data_y = paddle.randint(0, 1000, [num_batches * batch_size])
     dataset = paddle.io.TensorDataset([data_x, data_y])
     return paddle.io.DataLoader(
-        dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True,
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+        drop_last=True,
     )
 
 
@@ -125,10 +129,12 @@ def log_gpu_utilization(step=0, interval=1):
         return
     try:
         import subprocess
+
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5,
+            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         for i, line in enumerate(result.stdout.strip().split("\n")):
             parts = [p.strip() for p in line.split(",")]

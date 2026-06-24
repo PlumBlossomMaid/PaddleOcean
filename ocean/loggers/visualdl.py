@@ -79,6 +79,7 @@ class VisualDLLogger(Logger):
 
     @rank_zero_only
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
+        """Log metrics — only writes on rank 0 (lightning-compatible)."""
         if step is None:
             return
         for k, v in metrics.items():

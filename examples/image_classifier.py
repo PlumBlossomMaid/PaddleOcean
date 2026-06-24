@@ -18,7 +18,7 @@ import os
 import time
 
 import paddle
-import paddle.vision.transforms as T
+import paddle.vision.transforms as transforms
 from paddle.vision.datasets import MNIST
 
 import ocean
@@ -74,9 +74,9 @@ class MNISTClassifier(ocean.Model):
 # Data
 # ════════════════════════════════════════════════════════════════
 def make_dataloaders(batch_size=64):
-    transform = T.Compose([
-        T.ToTensor(),
-        T.Normalize(mean=[0.5], std=[0.5]),
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5], std=[0.5]),
     ])
 
     train_dataset = MNIST(mode="train", transform=transform, backend="cv2")

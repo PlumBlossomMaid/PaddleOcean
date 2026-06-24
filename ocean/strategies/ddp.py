@@ -53,7 +53,26 @@ class DDPStrategy(ParallelStrategy):
         self._detect_existing_distributed()
 
     def _detect_existing_distributed(self) -> None:
-        """Detect if distributed env is already initialized (e.g. via ``paddle.distributed.launch``)."""
+        """Detect if distributed env is already initialized and set rank from env vars.
+
+        Lightning sets ``rank_zero_only.rank`` in ``set_world_ranks()`` **before**
+        calling ``init_process_group``, reading ``RANK`` / ``LOCAL_RANK`` from the
+        environment set by the launcher.
+
+        Paddle's launcher sets ``PADDLE_TRAINER_ID`` (global rank) instead.
+        We read it here so ``rank_zero_only`` works from the start, even before
+        ``init_parallel_env()`` is called.
+        """
+        # Set rank from launcher env vars (Lightning pattern — before init)
+        trainer_id = os.environ.get("PADDLE_TRAINER_ID")
+        if trainer_id is not None:
+            self._rank = int(trainer_id)
+            self._local_rank = self._rank  # single-node: local == global
+            self._world_size = int(os.environ.get("PADDLE_TRAINERS_NUM", "1"))
+            from ocean.utils.rank_zero import rank_zero_only
+
+            rank_zero_only.rank = self._rank
+
         try:
             if paddle.distributed.is_initialized():
                 self._is_initialized = True
@@ -76,13 +95,6 @@ class DDPStrategy(ParallelStrategy):
         ``parallel_devices[local_rank]`` to get its assigned GPU.
         The ``CUDAAccelerator.setup_device()`` then calls
         ``paddle.device.set_device()`` to make it the active device.
-
-        Spawn mode vs launch mode:
-        - ``paddle.distributed.launch``: each process sees all GPUs.
-        - ``paddle.distributed.spawn``: ``FLAGS_selected_gpus`` is set but
-          we **clear** it before calling ``init_parallel_env`` so NCCL can
-          communicate across GPUs. Each process then selects its GPU via
-          ``parallel_devices[local_rank]``.
         """
         if self.parallel_devices and self._local_rank < len(self.parallel_devices):
             return self.parallel_devices[self._local_rank]
@@ -138,20 +150,17 @@ class DDPStrategy(ParallelStrategy):
         Call chain::
             accelerator.setup_device(root_device)
             paddle.distributed.init_parallel_env()
-
-        Spawn mode (``paddle.distributed.spawn``) sets ``FLAGS_selected_gpus``
-        which restricts GPU visibility and breaks NCCL cross-GPU communication.
-        We clear it here and rely on ``CUDAAccelerator.setup_device()`` to
-        select the correct GPU for this process.
         """
-        # Clear spawn's GPU restriction so NCCL can communicate across GPUs
-        os.environ.pop("FLAGS_selected_gpus", None)
-        if self._accelerator:
-            self._accelerator.setup_device(self.root_device)
-        else:
-            self._default_device_setup()
+        # Two modes:
+        # - launch (paddle.distributed.launch): FLAGS_selected_gpus already
+        #   restricts each process to one GPU.  root_device = CUDAPlace(0)
+        #   which is the only visible GPU (different physical GPU per rank).
+        # - spawn (paddle.distributed.spawn): same restriction via
+        #   FLAGS_selected_gpus.  We detect this and use index 0.
 
-        # Step 2: Initialize distributed if not already done
+        # Step 1: Initialize distributed if not already done.
+        # IMPORTANT: init BEFORE set_device so NCCL uses the current
+        # FLAGS_selected_gpus (which restricts each process to one GPU).
         if not self._is_initialized:
             try:
                 if paddle.distributed.is_available():
@@ -167,6 +176,12 @@ class DDPStrategy(ParallelStrategy):
                         self._local_rank = self._rank
             except Exception:
                 pass
+
+        # Step 2: Set device for this process via accelerator
+        if self._accelerator:
+            self._accelerator.setup_device(self.root_device)
+        else:
+            self._default_device_setup()
 
         # Step 3: Sync rank to rank_zero_only (Lightning pattern)
         from ocean.utils.rank_zero import rank_zero_only

@@ -39,10 +39,6 @@ class _FitLoop(_Loop):
         _call_module_hook(trainer, "on_train_start")
         _call_callback_hooks(trainer, "on_train_start")
 
-        # Log initial state at step 0 (0 % log_every_n_steps == 0)
-        if trainer.log_every_n_steps > 0:
-            trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
-
         device = trainer._resolve_device()
 
         while not self.done:
@@ -66,12 +62,6 @@ class _FitLoop(_Loop):
 
                 # Training step
                 result = model.training_step(batch, batch_idx)
-
-                # Periodic logger flush — use current step (before increment)
-                # so step 0 (0 % N == 0) triggers correctly and the interval
-                # matches the config value.
-                if trainer.dataloader_step % max(1, trainer.log_every_n_steps) == 0:
-                    trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
 
                 # Skip automatic backward/optimizer when manual optimization is used
                 # (model handles backward and step inside training_step)
@@ -107,11 +97,17 @@ class _FitLoop(_Loop):
                             trainer._optimizers[0].clear_grad()
                             opt_acc = 0
                             trainer._dataloader_step += 1
+                            # Log after optimizer step (Lightning: step = optimizer_step)
+                            step = trainer.optimizer_step
+                            if step > 0 and step % max(1, trainer.log_every_n_steps) == 0:
+                                trainer._logger_connector.log_metrics(trainer.logged_metrics, step)
                 else:
                     # Manual optimization: model handles backward/step inside training_step.
-                    # Track batch count for max_steps, logger flush and optimizer steps.
                     trainer._dataloader_step += 1
                     trainer._optimizer_step += 1
+                    step = trainer.optimizer_step
+                    if step > 0 and step % max(1, trainer.log_every_n_steps) == 0:
+                        trainer._logger_connector.log_metrics(trainer.logged_metrics, step)
 
                 model.on_train_batch_end(result, batch, batch_idx)
                 _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
@@ -188,9 +184,11 @@ class _FitLoop(_Loop):
                     _call_callback_hooks(trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0)
 
         trainer._compute_epoch_metrics()
-        # Flush validation metrics to logger (VisualDL/TensorBoard) immediately
-        # so val/* tags appear in VDL (Lightning: eval loop calls log_metrics internally)
-        trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
+        # Log only validation-specific metrics (train metrics from epoch end
+        # shouldn't be re-logged at the same step — creates duplicates).
+        val_metrics = {k: v for k, v in trainer._log_metrics_on_epoch.items() if k.startswith("val")}
+        if val_metrics:
+            trainer._logger_connector.log_metrics(val_metrics, trainer.dataloader_step)
         _call_module_hook(trainer, "on_validation_epoch_end")
         _call_callback_hooks(trainer, "on_validation_epoch_end")
         _call_module_hook(trainer, "on_validation_end")

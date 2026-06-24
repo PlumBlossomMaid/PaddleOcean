@@ -97,7 +97,6 @@ def rank_zero_experiment(fn: Callable) -> Callable:
         def experiment(self): ...
     """
 
-    @property  # type: ignore
     def wrapper(self: Any) -> Any:
         if rank_zero_only.rank > 0:
             return _DummyExperiment()

@@ -776,9 +776,8 @@ class Trainer:
         finally:
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
-            model.train()  # restore train mode after sanity check
-            # Reset metrics again after sanity check (Lightning-style)
-            # so val/* metrics don't pollute training step-0 log flushes
+            model.train()
+            # Reset metrics after sanity check (Lightning-style)
             self._logger_connector.reset_validation_metrics()
 
     def _teardown(self) -> None:
