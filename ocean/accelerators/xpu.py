@@ -38,15 +38,16 @@ class XPUAccelerator(Accelerator):
     """
 
     def setup_device(self, device: Any = None) -> Any:
-        """Return an XPUPlace for the given device.
+        """Set the current XPU device and return its XPUPlace.
 
-        Args:
-            device: A ``paddle.XPUPlace`` instance, an int (device index),
-                or ``None`` (defaults to device 0).
+        Both sets the device via ``paddle.device.set_device`` and returns
+        the corresponding ``paddle.XPUPlace`` (Lightning-compatible).
         """
         if isinstance(device, paddle.XPUPlace):
-            return device
-        idx = int(device) if device is not None else 0
+            idx = device.get_device_id()
+        else:
+            idx = int(device) if device is not None else 0
+        paddle.device.set_device(f"xpu:{idx}")
         return paddle.XPUPlace(idx)
 
     def setup(self, trainer: Any) -> None:

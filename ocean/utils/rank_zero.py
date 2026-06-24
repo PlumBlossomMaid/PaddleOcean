@@ -1,4 +1,16 @@
-"""Rank zero utilities - decorators and functions for distributed training."""
+"""Rank zero utilities — Lightning-style functions for distributed training.
+
+Usage::
+
+    @rank_zero_only
+    def log_metrics(self, ...): ...   # only runs on rank 0
+
+    rank_zero_info("hello")            # prints only on rank 0
+    rank_zero_warn("careful")          # warns only on rank 0
+
+The strategy sets ``rank_zero_only.rank`` during ``setup_environment()``
+so that the decorator works correctly in DDP mode.
+"""
 
 import os
 from typing import Any, Callable, TypeVar
@@ -6,41 +18,101 @@ from typing import Any, Callable, TypeVar
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def rank_zero_only(fn: F) -> F:
-    """Decorator to run a function only on rank 0.
+class _RankZeroOnly:
+    """Callable decorator that skips execution on non-zero ranks.
 
-    In non-distributed mode (world_size=1), the function always runs.
+    The strategy sets ``rank_zero_only.rank`` (mutable attribute) during
+    ``setup_environment()`` so the check reflects the real distributed rank.
+    Falls back to ``LOCAL_RANK`` env var before initialization.
     """
 
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        if local_rank == 0:
+    rank: int = 0
+
+    def __call__(self, fn: F) -> F:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            if self.rank > 0:
+                return None
             return fn(*args, **kwargs)
-        return None
 
-    return wrapper  # type: ignore
+        return wrapper  # type: ignore
 
 
+rank_zero_only = _RankZeroOnly()
+
+
+def _refresh_rank() -> None:
+    """Update ``rank_zero_only.rank`` from environment (used by strategy)."""
+    rank_zero_only.rank = int(os.environ.get("LOCAL_RANK", 0))
+
+
+# ------------------------------------------------------------------
+# Convenience logging functions (Lightning-style)
+# ------------------------------------------------------------------
+
+
+@rank_zero_only
 def rank_zero_debug(msg: str) -> None:
-    """Print debug message only on rank 0."""
-    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-        print(f"[DEBUG] {msg}")
+    print(f"[DEBUG] {msg}")
 
 
+@rank_zero_only
 def rank_zero_info(msg: str) -> None:
-    """Print info message only on rank 0."""
-    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-        print(f"[INFO] {msg}")
+    print(f"[INFO] {msg}")
 
 
+@rank_zero_only
 def rank_zero_warn(msg: str) -> None:
-    """Print warning message only on rank 0."""
-    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-        print(f"[WARN] {msg}")
+    print(f"[WARN] {msg}")
+
+
+# ------------------------------------------------------------------
+# _DummyExperiment — no-op for non-rank-0 processes (Lightning compat)
+# ------------------------------------------------------------------
+
+
+class _DummyExperiment:
+    """Stand-in for the real experiment on non-zero ranks (all methods are no-ops)."""
+
+    def __getattr__(self, name: str) -> Any:
+        return _no_op
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+
+def _no_op(*args: Any, **kwargs: Any) -> "_DummyExperiment":
+    return _DummyExperiment()
+
+
+def rank_zero_experiment(fn: Callable) -> Callable:
+    """Decorator for the ``experiment`` property — returns ``_DummyExperiment`` on ranks > 0.
+
+    Usage::
+
+        @property
+        @rank_zero_experiment
+        def experiment(self): ...
+    """
+
+    @property  # type: ignore
+    def wrapper(self: Any) -> Any:
+        if rank_zero_only.rank > 0:
+            return _DummyExperiment()
+        return fn(self)
+
+    return wrapper
+
+
+# ------------------------------------------------------------------
+# WarningCache (Lightning-style)
+# ------------------------------------------------------------------
 
 
 class WarningCache:
-    """Cache warnings to avoid repeating them."""
+    """Cache warnings to avoid repeating the same warning."""
 
     def __init__(self) -> None:
         self._warnings: set[str] = set()

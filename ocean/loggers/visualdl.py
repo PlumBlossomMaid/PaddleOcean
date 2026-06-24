@@ -1,18 +1,21 @@
-"""VisualDLLogger - logs metrics to VisualDL (Paddle's native visualization tool).
+"""VisualDLLogger — logs metrics to VisualDL (Paddle's native visualization tool).
 
 Lightning-compatible: auto-versioning, save_dir/name/version_N/ structure.
+Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure only
+rank 0 writes log files (matching Lightning's TensorBoardLogger pattern).
 """
 
 import os
 from typing import Any, Optional
 
 from ocean.loggers.base import Logger
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
 
 
 class VisualDLLogger(Logger):
     """Log metrics to VisualDL for visualization.
 
-    Lightning-compatible with auto-versioning.
+    Lightning-compatible with auto-versioning and rank-0-only logging.
 
     Args:
         save_dir: Directory to save logs.
@@ -54,13 +57,14 @@ class VisualDLLogger(Logger):
         return os.path.join(self._save_dir, self._name, ver)
 
     @property
+    @rank_zero_experiment
     def experiment(self) -> Any:
         if self._experiment is None:
             self._experiment = self._create_experiment()
         return self._experiment
 
     def _create_experiment(self) -> Any:
-        """Create a VisualDL LogWriter."""
+        """Create a VisualDL LogWriter (only called on rank 0)."""
         try:
             from visualdl import LogWriter
 
@@ -73,12 +77,8 @@ class VisualDLLogger(Logger):
 
             return _DummyWriter()
 
+    @rank_zero_only
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
-        """Log metrics — only writes on rank 0 (defense-in-depth)."""
-        import os
-
-        if int(os.environ.get("LOCAL_RANK", 0)) != 0:
-            return
         if step is None:
             return
         for k, v in metrics.items():
@@ -87,6 +87,7 @@ class VisualDLLogger(Logger):
                 v = v.item()
             self.experiment.add_scalar(key, float(v), step)
 
+    @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any]) -> None:
         try:
             import yaml
@@ -98,9 +99,11 @@ class VisualDLLogger(Logger):
         except ImportError:
             pass
 
+    @rank_zero_only
     def save(self) -> None:
         pass
 
+    @rank_zero_only
     def finalize(self, status: str) -> None:
         if self._experiment is not None:
             try:

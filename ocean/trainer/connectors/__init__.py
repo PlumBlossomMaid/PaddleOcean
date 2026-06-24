@@ -93,9 +93,7 @@ class _LoggerConnector:
             self.trainer.loggers = list(logger)
 
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
-        """Log metrics — only on global rank 0 (Lightning behavior)."""
-        if not getattr(self.trainer, "is_global_zero", True):
-            return
+        """Log metrics — delegates to each logger (which filter by rank internally)."""
         for lg in getattr(self.trainer, "loggers", None) or []:
             if hasattr(lg, "log_metrics"):
                 lg.log_metrics(metrics, step)

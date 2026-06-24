@@ -1,14 +1,10 @@
-"""Warning utilities for paddleOcean."""
+"""Warning utilities for paddleOcean.
 
-import warnings
+``rank_zero_warn`` and ``WarningCache`` are re-exported from
+``ocean.utils.rank_zero`` — this module exists for backward compat.
+"""
 
-
-def rank_zero_warn(msg: str) -> None:
-    """Emit a warning only on rank 0."""
-    import os
-
-    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-        warnings.warn(msg, stacklevel=2)
+from ocean.utils.rank_zero import rank_zero_warn  # noqa: F401
 
 
 class WarningCache:

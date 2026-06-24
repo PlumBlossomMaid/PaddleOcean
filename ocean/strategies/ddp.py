@@ -8,6 +8,7 @@ Supports:
 - Device-agnostic: works with CUDA, XPU, and CustomDevice accelerators
 """
 
+import os
 from typing import Any, Optional
 
 import paddle
@@ -69,6 +70,20 @@ class DDPStrategy(ParallelStrategy):
 
     @property
     def root_device(self) -> Any:
+        """Device for this process.
+
+        In both launch and spawn modes, each process uses
+        ``parallel_devices[local_rank]`` to get its assigned GPU.
+        The ``CUDAAccelerator.setup_device()`` then calls
+        ``paddle.device.set_device()`` to make it the active device.
+
+        Spawn mode vs launch mode:
+        - ``paddle.distributed.launch``: each process sees all GPUs.
+        - ``paddle.distributed.spawn``: ``FLAGS_selected_gpus`` is set but
+          we **clear** it before calling ``init_parallel_env`` so NCCL can
+          communicate across GPUs. Each process then selects its GPU via
+          ``parallel_devices[local_rank]``.
+        """
         if self.parallel_devices and self._local_rank < len(self.parallel_devices):
             return self.parallel_devices[self._local_rank]
         # Fallback when parallel_devices is not set
@@ -114,6 +129,7 @@ class DDPStrategy(ParallelStrategy):
     # Setup — matches Lightning's pattern:
     #   1. accelerator.setup_device(root_device)     → set device
     #   2. paddle.distributed.init_parallel_env()    → init distributed
+    #   3. rank_zero_only.rank = global_rank         → rank filter
     # ------------------------------------------------------------------
 
     def setup_environment(self) -> None:
@@ -122,8 +138,14 @@ class DDPStrategy(ParallelStrategy):
         Call chain::
             accelerator.setup_device(root_device)
             paddle.distributed.init_parallel_env()
+
+        Spawn mode (``paddle.distributed.spawn``) sets ``FLAGS_selected_gpus``
+        which restricts GPU visibility and breaks NCCL cross-GPU communication.
+        We clear it here and rely on ``CUDAAccelerator.setup_device()`` to
+        select the correct GPU for this process.
         """
-        # Step 1: Set device for this process via accelerator
+        # Clear spawn's GPU restriction so NCCL can communicate across GPUs
+        os.environ.pop("FLAGS_selected_gpus", None)
         if self._accelerator:
             self._accelerator.setup_device(self.root_device)
         else:
@@ -145,6 +167,11 @@ class DDPStrategy(ParallelStrategy):
                         self._local_rank = self._rank
             except Exception:
                 pass
+
+        # Step 3: Sync rank to rank_zero_only (Lightning pattern)
+        from ocean.utils.rank_zero import rank_zero_only
+
+        rank_zero_only.rank = self._rank
 
     def _default_device_setup(self) -> None:
         """Fallback device setup when no accelerator is configured."""

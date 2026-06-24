@@ -51,15 +51,16 @@ class CustomDeviceAccelerator(Accelerator):
     # ------------------------------------------------------------------
 
     def setup_device(self, device: Any = None) -> Any:
-        """Return a CustomPlace for the given device.
+        """Set the current custom device and return its CustomPlace.
 
-        Args:
-            device: A ``paddle.CustomPlace`` instance, an int (device index),
-                or ``None`` (defaults to device 0).
+        Both sets the device via ``paddle.device.set_device`` and returns
+        the corresponding ``paddle.CustomPlace`` (Lightning-compatible).
         """
         if isinstance(device, paddle.CustomPlace):
-            return device
-        idx = int(device) if device is not None else 0
+            idx = device.get_device_id()
+        else:
+            idx = int(device) if device is not None else 0
+        paddle.device.set_device(f"{self.device_type}:{idx}")
         return paddle.CustomPlace(self.device_type, idx)
 
     def setup(self, trainer: Any) -> None:
