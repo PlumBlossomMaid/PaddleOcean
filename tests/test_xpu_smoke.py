@@ -2,6 +2,7 @@
 
 All tests are skipped when XPU is not available.
 """
+
 import pytest
 
 import ocean
@@ -57,9 +58,7 @@ def test_xpu_trainer():
             return loss
 
         def configure_optimizers(self):
-            return ocean.optimizer.Adam(
-                learning_rate=0.001, parameters=self.parameters()
-            )
+            return ocean.optimizer.Adam(learning_rate=0.001, parameters=self.parameters())
 
     x = ocean.randn([32, 10])
     y = ocean.randint(0, 2, [32])
