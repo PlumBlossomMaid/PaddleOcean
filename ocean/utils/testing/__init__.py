@@ -105,9 +105,7 @@ def skip_on_custom_device(
             if _targets is None or current in _targets:
                 import pytest
 
-                pytest.skip(
-                    f"{reason} (device={current})"
-                )
+                pytest.skip(f"{reason} (device={current})")
             return fn(*args, **kwargs)
 
         return wrapper

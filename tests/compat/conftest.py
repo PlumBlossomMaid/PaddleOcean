@@ -1,5 +1,6 @@
 """conftest for compat tests — centralized device blacklist."""
 
+from typing import Optional
 
 import paddle
 
@@ -16,10 +17,10 @@ _DEVICE_BLACKLIST = {
 }
 
 # Memoised device-type lookup.
-_custom_device_type: str | None = None
+_custom_device_type: Optional[str] = None
 
 
-def _get_device_type() -> str | None:
+def _get_device_type() -> Optional[str]:
     global _custom_device_type
     if _custom_device_type is None:
         types = paddle.device.get_all_custom_device_type()
@@ -36,7 +37,4 @@ def in_device_blacklist() -> bool:
 def blacklist_skip_msg() -> str:
     """Descriptive skip message mentioning the device name."""
     dev = _get_device_type() or "unknown"
-    return (
-        f"Device '{dev}' is in the test blacklist "
-        f"(see tests/compat/conftest.py _DEVICE_BLACKLIST)"
-    )
+    return f"Device '{dev}' is in the test blacklist (see conftest.py _DEVICE_BLACKLIST)"
