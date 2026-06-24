@@ -35,6 +35,7 @@ from conftest import blacklist_skip_msg, in_device_blacklist
 from parameterized import parameterized
 
 from ocean._compat import audio as compat_audio
+from ocean.utils.testing import assert_close
 
 
 def parameterize(*params):
@@ -84,9 +85,7 @@ class TestAudioComponents(unittest.TestCase):
         )
         d_pd = paddle.abs(x_pd).numpy()
 
-        np.testing.assert_array_almost_equal(
-            d_lib, d_pd, decimal=3, err_msg=f"STFT magnitude mismatch: n_fft={n_fft}, hop={hop_length}"
-        )
+        assert_close(d_lib, d_pd, msg=f"STFT magnitude mismatch: n_fft={n_fft}, hop={hop_length}")
 
     # ── Power spectrogram ──────────────────────────────────────────────
 
@@ -116,9 +115,7 @@ class TestAudioComponents(unittest.TestCase):
         )
         spec_pd = layer(x).squeeze(0).numpy()
 
-        np.testing.assert_array_almost_equal(
-            spec_lib, spec_pd, decimal=5, err_msg=f"Power spectrogram mismatch: n_fft={n_fft}, hop={hop_length}"
-        )
+        assert_close(spec_lib, spec_pd, msg=f"Power spectrogram mismatch: n_fft={n_fft}, hop={hop_length}")
 
     # ── Mel filter bank ────────────────────────────────────────────────
 
@@ -131,9 +128,7 @@ class TestAudioComponents(unittest.TestCase):
             sr=sr, n_fft=n_fft, n_mels=n_mels, f_min=fmin, f_max=fmax, norm="slaney", htk=False
         ).numpy()
 
-        np.testing.assert_array_almost_equal(
-            fb_lib, fb_pd, decimal=5, err_msg=f"Mel filter bank mismatch: n_mels={n_mels}, sr={sr}"
-        )
+        assert_close(fb_lib, fb_pd, msg=f"Mel filter bank mismatch: n_mels={n_mels}, sr={sr}")
 
     # ── Mel spectrogram (matched params) ───────────────────────────────
 
@@ -179,9 +174,7 @@ class TestAudioComponents(unittest.TestCase):
         )
         mel_pd = layer(x).squeeze(0).numpy()
 
-        np.testing.assert_array_almost_equal(
-            mel_lib, mel_pd, decimal=5, err_msg=f"Mel spectrogram mismatch: n_fft={n_fft}, hop={hop_length}"
-        )
+        assert_close(mel_lib, mel_pd, msg=f"Mel spectrogram mismatch: n_fft={n_fft}, hop={hop_length}")
 
     # ── power_to_db ────────────────────────────────────────────────────
 
@@ -194,7 +187,7 @@ class TestAudioComponents(unittest.TestCase):
         ref = librosa.power_to_db(spec, top_db=None)
         out = compat_audio.functional.power_to_db(paddle.to_tensor(spec), top_db=None).numpy()
 
-        np.testing.assert_array_almost_equal(ref, out, decimal=5)
+        assert_close(ref, out)
 
     @parameterize(["float32", "float64"])
     def test_power_to_db_with_topdb(self, dtype):
@@ -205,7 +198,7 @@ class TestAudioComponents(unittest.TestCase):
         ref = librosa.power_to_db(spec, top_db=80.0)
         out = compat_audio.functional.power_to_db(paddle.to_tensor(spec), top_db=80.0).numpy()
 
-        np.testing.assert_array_almost_equal(ref, out, decimal=5)
+        assert_close(ref, out)
 
     # ── DCT (used by MFCC) ────────────────────────────────────────────
 
@@ -334,11 +327,10 @@ class TestAudioComponents(unittest.TestCase):
         logmel_pd = logmel_layer(x).squeeze(0).numpy()
         mfcc_split = scipy.fftpack.dct(logmel_pd, axis=0, type=2, norm="ortho")[:n_mfcc]
 
-        np.testing.assert_array_almost_equal(
+        assert_close(
             mfcc_direct,
             mfcc_split,
-            decimal=4,
-            err_msg=f"MFCC self-consistency failed: n_fft={n_fft}, n_mfcc={n_mfcc}, n_mels={n_mels}",
+            msg=f"MFCC self-consistency failed: n_fft={n_fft}, n_mfcc={n_mfcc}, n_mels={n_mels}",
         )
 
 

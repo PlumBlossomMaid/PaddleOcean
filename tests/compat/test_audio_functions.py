@@ -22,6 +22,7 @@ from parameterized import parameterized
 from scipy import signal
 
 from ocean._compat import audio as compat_audio
+from ocean.utils.testing import assert_close
 
 
 def parameterize(*params):
@@ -66,18 +67,18 @@ class TestAudioFunctions(unittest.TestCase):
         mel_paddle = compat_audio.functional.hz_to_mel(val, htk_flag)
         mel_paddle_tensor = compat_audio.functional.hz_to_mel(paddle.to_tensor([val]), htk_flag)
         mel_librosa = librosa.hz_to_mel(val, htk=htk_flag)
-        np.testing.assert_almost_equal(mel_paddle, mel_librosa, decimal=5)
-        np.testing.assert_almost_equal(mel_paddle_tensor.numpy(), mel_librosa, decimal=3)
+        assert_close(mel_paddle, mel_librosa)
+        assert_close(mel_paddle_tensor.numpy(), mel_librosa)
 
         hz_paddle = compat_audio.functional.mel_to_hz(val, htk_flag)
         hz_paddle_tensor = compat_audio.functional.mel_to_hz(paddle.to_tensor([val]), htk_flag)
         hz_librosa = librosa.mel_to_hz(val, htk=htk_flag)
-        np.testing.assert_almost_equal(hz_paddle, hz_librosa, decimal=4)
-        np.testing.assert_almost_equal(hz_paddle_tensor.numpy(), hz_librosa, decimal=4)
+        assert_close(hz_paddle, hz_librosa)
+        assert_close(hz_paddle_tensor.numpy(), hz_librosa)
 
         decibel_paddle = compat_audio.functional.power_to_db(paddle.to_tensor([val]))
         decibel_librosa = librosa.power_to_db(val)
-        np.testing.assert_almost_equal(decibel_paddle.numpy(), decibel_paddle, decimal=5)
+        assert_close(decibel_paddle.numpy(), decibel_paddle)
 
     @parameterize([1.0, 3.0, 9.0, 25.0], [True, False])
     def test_audio_function_static(self, val: float, htk_flag: bool):
@@ -106,13 +107,13 @@ class TestAudioFunctions(unittest.TestCase):
             )
 
             mel_librosa = librosa.hz_to_mel(val, htk=htk_flag)
-            np.testing.assert_almost_equal(mel_paddle_tensor_ret, mel_librosa, decimal=3)
+            assert_close(mel_paddle_tensor_ret, mel_librosa)
 
             hz_librosa = librosa.mel_to_hz(val, htk=htk_flag)
-            np.testing.assert_almost_equal(hz_paddle_tensor_ret, hz_librosa, decimal=4)
+            assert_close(hz_paddle_tensor_ret, hz_librosa)
 
             decibel_librosa = librosa.power_to_db(val)
-            np.testing.assert_almost_equal(decibel_paddle_ret, decibel_librosa, decimal=5)
+            assert_close(decibel_paddle_ret, decibel_librosa)
 
         paddle.disable_static()
 
@@ -120,7 +121,7 @@ class TestAudioFunctions(unittest.TestCase):
     def test_audio_function_mel(self, n_mels: int, f_min: float, f_max: float, htk_flag: bool):
         librosa_mel_freq = librosa.mel_frequencies(n_mels, fmin=f_min, fmax=f_max, htk=htk_flag)
         paddle_mel_freq = compat_audio.functional.mel_frequencies(n_mels, f_min, f_max, htk_flag, "float64")
-        np.testing.assert_almost_equal(paddle_mel_freq, librosa_mel_freq, decimal=3)
+        assert_close(paddle_mel_freq, librosa_mel_freq)
 
     @parameterize([64, 128, 256], [0.0, 0.5, 1.0], [10000, 11025], [False, True])
     # TODO(MarioLulab) May cause precision error. Fix it soon
@@ -135,7 +136,7 @@ class TestAudioFunctions(unittest.TestCase):
         exe = paddle.static.Executor()
         (paddle_mel_freq_ret,) = exe.run(main, fetch_list=[paddle_mel_freq])
         librosa_mel_freq = librosa.mel_frequencies(n_mels, fmin=f_min, fmax=f_max, htk=htk_flag)
-        np.testing.assert_almost_equal(paddle_mel_freq_ret, librosa_mel_freq, decimal=3)
+        assert_close(paddle_mel_freq_ret, librosa_mel_freq)
 
         paddle.disable_static()
 
@@ -143,7 +144,7 @@ class TestAudioFunctions(unittest.TestCase):
     def test_audio_function_fft(self, sr: int, n_fft: int):
         librosa_fft = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
         paddle_fft = compat_audio.functional.fft_frequencies(sr, n_fft)
-        np.testing.assert_almost_equal(paddle_fft, librosa_fft, decimal=5)
+        assert_close(paddle_fft, librosa_fft)
 
     @parameterize([1.0, 3.0, 9.0])
     def test_audio_function_exception(self, spect: float):
@@ -179,20 +180,20 @@ class TestAudioFunctions(unittest.TestCase):
     def test_window(self, window_type: str, n_fft: int):
         window_scipy = signal.get_window(window_type, n_fft)
         window_paddle = compat_audio.functional.get_window(window_type, n_fft)
-        np.testing.assert_array_almost_equal(window_scipy, window_paddle.numpy(), decimal=5)
+        assert_close(window_scipy, window_paddle.numpy())
 
     @parameterize([1, 512])
     def test_gaussian_window_and_exception(self, n_fft: int):
         window_scipy_gaussain = signal.windows.gaussian(n_fft, std=7)
         window_paddle_gaussian = compat_audio.functional.get_window(("gaussian", 7), n_fft, False)
-        np.testing.assert_array_almost_equal(window_scipy_gaussain, window_paddle_gaussian.numpy(), decimal=5)
+        assert_close(window_scipy_gaussain, window_paddle_gaussian.numpy())
         window_scipy_general_gaussain = signal.windows.general_gaussian(n_fft, 1, 7)
         window_paddle_general_gaussian = compat_audio.functional.get_window(("general_gaussian", 1, 7), n_fft, False)
-        np.testing.assert_array_almost_equal(window_scipy_gaussain, window_paddle_gaussian.numpy(), decimal=5)
+        assert_close(window_scipy_gaussain, window_paddle_gaussian.numpy())
 
         window_scipy_exp = signal.windows.exponential(n_fft)
         window_paddle_exp = compat_audio.functional.get_window(("exponential", None, 1), n_fft, False)
-        np.testing.assert_array_almost_equal(window_scipy_exp, window_paddle_exp.numpy(), decimal=5)
+        assert_close(window_scipy_exp, window_paddle_exp.numpy())
 
         try:
             window_paddle = compat_audio.functional.get_window("hann", -1)
@@ -222,7 +223,7 @@ class TestAudioFunctions(unittest.TestCase):
 
         librosa_dct = dct(n_mfcc, n_mels)
         paddle_dct = compat_audio.functional.create_dct(n_mfcc, n_mels)
-        np.testing.assert_array_almost_equal(librosa_dct, paddle_dct, decimal=5)
+        assert_close(librosa_dct, paddle_dct)
 
     @parameterize(
         [128, 256, 512],
@@ -261,7 +262,7 @@ class TestAudioFunctions(unittest.TestCase):
             normalized=False,
             onesided=True,
         ).squeeze(0)
-        np.testing.assert_array_almost_equal(feature_librosa, feature_paddle, decimal=5)
+        assert_close(feature_librosa, feature_paddle)
 
         feature_bg = np.power(np.abs(feature_librosa), 2.0)
         feature_extractor = compat_audio.features.Spectrogram(
@@ -274,7 +275,7 @@ class TestAudioFunctions(unittest.TestCase):
             pad_mode=self.pad_mode,
         )
         feature_layer = feature_extractor(x).squeeze(0)
-        np.testing.assert_array_almost_equal(feature_layer, feature_bg, decimal=3)
+        assert_close(feature_layer, feature_bg)
 
     @parameterize(
         [128, 256, 512],
@@ -324,7 +325,7 @@ class TestAudioFunctions(unittest.TestCase):
             return_complex=False,
         ).squeeze(0)
 
-        np.testing.assert_array_almost_equal(feature_librosa, feature_paddle, decimal=5)
+        assert_close(feature_librosa, feature_paddle)
 
 
 if __name__ == "__main__":
