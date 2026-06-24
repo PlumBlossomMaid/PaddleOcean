@@ -3,11 +3,20 @@
 Gear provides manual control over training with minimal boilerplate.
 Users write their own training loop while Gear handles device placement,
 precision, distributed setup, and checkpointing.
+
+Multi-GPU support::
+    gear = ocean.Gear(accelerator="gpu", devices=2, strategy="ddp")
+    gear.launch()  # spawns processes if needed
+    model = gear.setup(model)
+    # ... training loop ...
 """
 
 from typing import Any, Optional, Union
 
 import paddle
+
+from ocean.accelerators.accelerator import Accelerator
+from ocean.strategies import DDPStrategy, Strategy
 
 
 class Gear:
@@ -15,26 +24,21 @@ class Gear:
 
     Usage::
 
+        # Single device
         gear = ocean.Gear(accelerator="gpu", devices=1)
         model = paddle.nn.Linear(10, 2)
-        optimizer = paddle.optimizer.SGD(learning_rate=0.01, parameters=model.parameters())
-
         model = gear.setup(model)
-        dataloader = gear.setup_dataloaders(dataloader)
 
-        for batch in dataloader:
-            x, y = batch
-            optimizer.clear_grad()
-            loss = paddle.nn.functional.cross_entropy(model(x), y)
-            gear.backward(loss)
-            optimizer.step()
-
-        gear.save("checkpoint.pth", {"model": model, "optimizer": optimizer})
+        # Multi-GPU DDP
+        gear = ocean.Gear(accelerator="gpu", devices=2, strategy="ddp")
+        gear.launch()
+        model = gear.setup(model)
 
     Args:
-        accelerator: Device type ('cpu', 'gpu', 'auto').
-        devices: Number of devices or device IDs.
-        precision: Training precision ('32', '16-mixed', 'bf16-mixed').
+        accelerator: Device type (``'auto'``, ``'cpu'``, ``'gpu'``, ``'xpu'``).
+        devices: Number of devices or device IDs (``1``, ``2``, ``"0,1"``).
+        strategy: Strategy name (``'auto'``, ``'ddp'``, ``'single_device'``).
+        precision: Training precision (``'32'``, ``'16-mixed'``, ``'bf16-mixed'``).
         loggers: Optional logger(s).
     """
 
@@ -42,22 +46,78 @@ class Gear:
         self,
         accelerator: str = "auto",
         devices: Union[str, int, list[int]] = "auto",
+        strategy: str = "auto",
         precision: str = "32",
         loggers: Optional[Union[Any, list[Any]]] = None,
     ) -> None:
-        self.accelerator = accelerator
-        self.devices = devices
-        self.precision = precision
+        self.accelerator_flag = accelerator
+        self.devices_flag = devices
+        self.strategy_flag = strategy
+        self.precision_flag = precision
         self.loggers = [loggers] if loggers is not None and not isinstance(loggers, (list, tuple)) else (loggers or [])
         self._models_setup = 0
-        self._device = self._resolve_device()
+        self._launched = False
+        self._strategy: Optional[Strategy] = None
+        self._accelerator: Optional[Accelerator] = None
+
+        # Resolve accelerator and strategy (aligned with _AcceleratorConnector)
+        self._resolve()
 
     @property
     def device(self) -> paddle.CPUPlace:
-        return self._device
+        strategy = self._strategy or self._resolve_fallback_strategy()
+        return strategy.root_device if strategy else paddle.CPUPlace()
+
+    @property
+    def strategy(self) -> Optional[Strategy]:
+        return self._strategy
+
+    # ------------------------------------------------------------------
+    # Resolution — mirrors _AcceleratorConnector logic
+    # ------------------------------------------------------------------
+
+    def _resolve(self) -> None:
+        from ocean.trainer.connectors import _AcceleratorConnector
+
+        self._accelerator = _AcceleratorConnector._resolve_accelerator(self.accelerator_flag)
+        parallel = self._accelerator.get_parallel_devices(self.devices_flag)
+        self._strategy = _AcceleratorConnector._resolve_strategy(self.strategy_flag, parallel)
+        self._strategy.accelerator = self._accelerator
+        self._strategy.parallel_devices = parallel
+
+    def _resolve_fallback_strategy(self) -> Strategy:
+        """Create a minimal strategy for device access."""
+        from ocean.strategies.single_device import SingleDeviceStrategy
+
+        return SingleDeviceStrategy(device="cpu")
+
+    # ------------------------------------------------------------------
+    # Launch — multi-process entry point (Fabric.launch equivalent)
+    # ------------------------------------------------------------------
+
+    def launch(self) -> None:
+        """Set up the distributed environment.
+
+        In multi-process mode, this would spawn subprocesses. Currently
+        sets up the device and distributed environment in the current process
+        (intended for use with ``paddle.distributed.launch`` or similar).
+        """
+        if self._launched:
+            return
+        self._launched = True
+
+        if self._strategy:
+            self._strategy.setup_environment()
+
+    # ------------------------------------------------------------------
+    # Setup model/optimizers
+    # ------------------------------------------------------------------
 
     def setup(self, module: paddle.nn.Layer, *optimizers: paddle.optimizer.Optimizer) -> Any:
         """Set up a model (and optional optimizers) for accelerated training.
+
+        Moves model to device and, in DDP mode, wraps it in
+        ``paddle.distributed.DataParallel``.
 
         Args:
             module: The model to set up.
@@ -66,8 +126,23 @@ class Gear:
         Returns:
             Model (and optimizers) ready for training.
         """
-        module.to(self._device)
         self._models_setup += 1
+
+        if self._strategy:
+            self._strategy._model = module
+            # Only DDP-wrap on the first call (like Fabric)
+            if self._models_setup == 1 and isinstance(self._strategy, DDPStrategy):
+                self._strategy.model_to_device()
+                if self._strategy._is_initialized:
+                    module = paddle.distributed.DataParallel(
+                        module,
+                        find_unused_parameters=getattr(self._strategy, "_find_unused_parameters", False),
+                    )
+                    self._strategy._model = module
+            elif self._strategy:
+                module.to(self._strategy.root_device)
+        else:
+            module.to(paddle.CPUPlace())
 
         if optimizers:
             return (module, *optimizers)
@@ -87,13 +162,20 @@ class Gear:
             return dataloaders[0]
         return dataloaders
 
+    # ------------------------------------------------------------------
+    # Training helpers
+    # ------------------------------------------------------------------
+
     def backward(self, tensor: paddle.Tensor, *args: Any, **kwargs: Any) -> None:
         """Backward pass. Handles precision scaling if needed.
 
         Args:
             tensor: Loss tensor to backpropagate.
         """
-        tensor.backward(*args, **kwargs)
+        if self._strategy:
+            self._strategy.backward(tensor, *args, **kwargs)
+        else:
+            tensor.backward(*args, **kwargs)
 
     def save(self, path: str, state: dict[str, Any]) -> None:
         """Save a checkpoint.
@@ -102,6 +184,9 @@ class Gear:
             path: File path.
             state: Dictionary containing model/optimizer state.
         """
+        if self._strategy and not getattr(self._strategy, "is_global_zero", True):
+            return  # Only save on rank 0
+
         serializable = {}
         for k, v in state.items():
             if isinstance(v, paddle.nn.Layer):
@@ -135,6 +220,8 @@ class Gear:
 
     def barrier(self, name: Optional[str] = None) -> None:
         """Barrier for distributed synchronization. No-op in single-process mode."""
+        if self._strategy:
+            self._strategy.barrier(name)
 
     def seed_everything(self, seed: int = 42, verbose: bool = True) -> int:
         """Set global random seed.
@@ -159,27 +246,26 @@ class Gear:
 
     def print(self, *args: Any, **kwargs: Any) -> None:
         """Print only on the main process."""
-        print(*args, **kwargs)
+        if not self._strategy or getattr(self._strategy, "is_global_zero", True):
+            print(*args, **kwargs)
 
     def to_device(self, obj: Any) -> Any:
         """Move a tensor/model to the Gear's device."""
+        device = self.device
         if isinstance(obj, paddle.nn.Layer):
-            return obj.to(self._device)
+            return obj.to(device)
         if isinstance(obj, paddle.Tensor):
-            return obj.to(self._device)
+            return obj.to(device)
+        if isinstance(obj, (list, tuple)):
+            return type(obj)(self.to_device(item) for item in obj)
+        if isinstance(obj, dict):
+            return {k: self.to_device(v) for k, v in obj.items()}
         return obj
 
     def autocast(self) -> Any:
         """Return an autocast context manager for mixed precision."""
-        if self.precision == "16":
+        if self.precision_flag == "16":
             return paddle.amp.auto_cast(level="O1")
-        elif self.precision == "bf16":
+        elif self.precision_flag == "bf16":
             return paddle.amp.auto_cast(level="O2", dtype="bfloat16")
         return paddle.no_grad()  # no-op context for fp32
-
-    def _resolve_device(self) -> paddle.CPUPlace:
-        if self.accelerator in ("auto", "cpu"):
-            return paddle.CPUPlace()
-        if self.accelerator == "gpu" and paddle.is_compiled_with_cuda():
-            return paddle.CUDAPlace(0)
-        return paddle.CPUPlace()

@@ -1,11 +1,11 @@
 """DDPStrategy - Distributed Data Parallel using PaddlePaddle's native distributed API.
 
 Supports:
-- `paddle.distributed.init_parallel_env` / `init_parallel_env`
-- `paddle.distributed.DataParallel` for model wrapping
+- ``paddle.distributed.init_parallel_env`` / ``init_parallel_env``
+- ``paddle.distributed.DataParallel`` for model wrapping
 - Collective ops: all_reduce, broadcast, all_gather, barrier, reduce
-- `paddle.distributed.spawn` for process launching
-- Fleet API for large-scale distributed training
+- ``paddle.distributed.spawn`` for process launching
+- Device-agnostic: works with CUDA, XPU, and CustomDevice accelerators
 """
 
 from typing import Any, Optional
@@ -18,9 +18,16 @@ from ocean.strategies.parallel import ParallelStrategy
 class DDPStrategy(ParallelStrategy):
     """Distributed Data Parallel strategy using PaddlePaddle native distributed API.
 
+    Device-agnostic: works with CUDA, XPU, and CustomDevice accelerators.
+    ``root_device`` is derived from ``parallel_devices[local_rank]``, so the
+    device type is determined entirely by the accelerator.
+
     Args:
-        process_group_backend: Communication backend ('nccl', 'gloo', or None for auto).
+        process_group_backend: Communication backend (``'nccl'``, ``'gloo'``,
+            or ``None`` for auto-detect based on accelerator type).
         find_unused_parameters: If True, find unused parameters in the model.
+        parallel_devices: List of device ``Place`` objects for each process.
+        accelerator: The accelerator instance (injected by ``_AcceleratorConnector``).
         **kwargs: Additional arguments.
     """
 
@@ -28,21 +35,24 @@ class DDPStrategy(ParallelStrategy):
         self,
         process_group_backend: Optional[str] = None,
         find_unused_parameters: bool = False,
+        parallel_devices: Optional[list[Any]] = None,
+        accelerator: Optional[Any] = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(accelerator=accelerator, *args, **kwargs)
         self._process_group_backend = process_group_backend
         self._find_unused_parameters = find_unused_parameters
+        self.parallel_devices = parallel_devices or []
         self._is_initialized = False
         self._rank = 0
         self._local_rank = 0
         self._world_size = 1
         self._node_rank = 0
-        self._init_distributed()
+        self._detect_existing_distributed()
 
-    def _init_distributed(self) -> None:
-        """Initialize distributed environment if available."""
+    def _detect_existing_distributed(self) -> None:
+        """Detect if distributed env is already initialized (e.g. via ``paddle.distributed.launch``)."""
         try:
             if paddle.distributed.is_initialized():
                 self._is_initialized = True
@@ -50,24 +60,18 @@ class DDPStrategy(ParallelStrategy):
                 self._world_size = paddle.distributed.get_world_size()
                 self._local_rank = int(paddle.distributed.ParallelEnv().local_rank)
                 self._node_rank = int(paddle.distributed.ParallelEnv().node_rank)
-                return
-            # Try to auto-initialize
-            if paddle.distributed.is_available():
-                try:
-                    paddle.distributed.init_parallel_env()
-                    self._is_initialized = True
-                    self._rank = paddle.distributed.get_rank()
-                    self._world_size = paddle.distributed.get_world_size()
-                    env = paddle.distributed.ParallelEnv()
-                    self._local_rank = int(env.local_rank)
-                    self._node_rank = int(env.node_rank)
-                except Exception:
-                    self._is_initialized = False
         except Exception:
-            self._is_initialized = False
+            pass
+
+    # ------------------------------------------------------------------
+    # Device-agnostic root_device — delegates entirely to parallel_devices
+    # ------------------------------------------------------------------
 
     @property
     def root_device(self) -> Any:
+        if self.parallel_devices and self._local_rank < len(self.parallel_devices):
+            return self.parallel_devices[self._local_rank]
+        # Fallback when parallel_devices is not set
         if paddle.is_compiled_with_cuda():
             return paddle.CUDAPlace(self._local_rank)
         return paddle.CPUPlace()
@@ -99,14 +103,52 @@ class DDPStrategy(ParallelStrategy):
             "rank": self._rank,
         }
 
+    # ------------------------------------------------------------------
+    # Setup — matches Lightning's pattern:
+    #   1. accelerator.setup_device(root_device)     → set device
+    #   2. paddle.distributed.init_parallel_env()    → init distributed
+    # ------------------------------------------------------------------
+
     def setup_environment(self) -> None:
-        """Set up distributed environment."""
-        super().setup_environment()
-        if self._is_initialized and paddle.is_compiled_with_cuda():
+        """Set up distributed environment: device + process group.
+
+        Call chain::
+            accelerator.setup_device(root_device)
+            paddle.distributed.init_parallel_env()
+        """
+        # Step 1: Set device for this process via accelerator
+        if self._accelerator:
+            self._accelerator.setup_device(self.root_device)
+        else:
+            self._default_device_setup()
+
+        # Step 2: Initialize distributed if not already done
+        if not self._is_initialized:
+            try:
+                if paddle.distributed.is_available():
+                    paddle.distributed.init_parallel_env()
+                    self._is_initialized = True
+                    self._rank = paddle.distributed.get_rank()
+                    self._world_size = paddle.distributed.get_world_size()
+                    try:
+                        env = paddle.distributed.ParallelEnv()
+                        self._local_rank = int(env.local_rank)
+                        self._node_rank = int(env.node_rank)
+                    except Exception:
+                        self._local_rank = self._rank
+            except Exception:
+                pass
+
+    def _default_device_setup(self) -> None:
+        """Fallback device setup when no accelerator is configured."""
+        device = self.root_device
+        if isinstance(device, paddle.CUDAPlace):
             paddle.device.set_device(f"gpu:{self._local_rank}")
+        elif isinstance(device, paddle.XPUPlace):
+            paddle.device.set_device(f"xpu:{self._local_rank}")
 
     def setup(self, trainer: Any) -> None:
-        """Full setup with DDP wrapping."""
+        """Full setup: precision, model to device, DDP wrapping, optimizers."""
         if self._accelerator:
             self._accelerator.setup(trainer)
         self._precision_plugin.convert_module(self._model)
@@ -120,23 +162,33 @@ class DDPStrategy(ParallelStrategy):
 
         self.setup_optimizers(trainer)
 
+    def _determine_ddp_device_ids(self) -> Optional[list[int]]:
+        """Return device_ids for DDP, or ``None`` for CPU.
+
+        Matches Lightning's ``determine_ddp_device_ids()``:
+        - CUDA/XPU: return ``[local_rank]``
+        - CPU: return ``None``
+        """
+        device = self.root_device
+        if isinstance(device, (paddle.CUDAPlace, paddle.XPUPlace)):
+            return [self._local_rank]
+        # CustomDevicePlace check via string representation
+        device_str = str(device)
+        if device_str.startswith("Place(custom"):
+            return [self._local_rank]
+        return None
+
     def model_to_device(self) -> None:
-        """Move model to the appropriate device."""
+        """Move model to the appropriate device (device-agnostic)."""
         if self._model is not None:
             self._model.to(self.root_device)
 
     # ==================================================================
-    # Collective communication operations
+    # Collective communication operations (unchanged, already device-agnostic)
     # ==================================================================
 
     def reduce(self, tensor: Any, reduce_op: str = "mean", group: Any = None) -> Any:
-        """Reduce a tensor across all processes.
-
-        Args:
-            tensor: The tensor to reduce.
-            reduce_op: 'mean' or 'sum' for the reduction.
-            group: Process group (currently uses world group).
-        """
+        """Reduce a tensor across all processes."""
         if not self._is_initialized or not isinstance(tensor, paddle.Tensor):
             return tensor
         try:
@@ -246,29 +298,33 @@ class DDPStrategy(ParallelStrategy):
             return {}
 
     # ==================================================================
-    # Launch utilities
+    # Launch utilities — matches Lightning's launcher pattern
     # ==================================================================
 
     @staticmethod
     def spawn(fn: Any, nprocs: int = 1, **kwargs: Any) -> Any:
-        """Launch distributed training using spawn.
+        """Launch distributed training using ``paddle.distributed.spawn``.
 
         Args:
-            fn: Function to run in parallel.
+            fn: Function to run in parallel. Receives ``fn(*args)`` in each process.
             nprocs: Number of processes to spawn.
-            **kwargs: Arguments passed to paddle.distributed.spawn.
+            **kwargs: Arguments passed to ``paddle.distributed.spawn``.
         """
         return paddle.distributed.spawn(fn, nprocs=nprocs, **kwargs)
 
     @staticmethod
     def launch(fn: Any, **kwargs: Any) -> Any:
-        """Launch distributed training (alias for spawn).
+        """Launch distributed training (alias for ``spawn``).
 
         Args:
             fn: Function to run.
-            **kwargs: Arguments passed to paddle.distributed.spawn.
+            **kwargs: Arguments passed to ``paddle.distributed.spawn``.
         """
         return DDPStrategy.spawn(fn, **kwargs)
+
+    def num_processes(self) -> int:
+        """Return the total number of processes for this strategy."""
+        return len(self.parallel_devices) if self.parallel_devices else self._world_size
 
     # ==================================================================
     # Teardown
