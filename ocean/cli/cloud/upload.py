@@ -562,27 +562,26 @@ def _sts_multipart_upload(sts_token: dict, local_path: str, desc: str) -> None:
 # ── LFS flow ────────────────────────────────────────────────────────
 
 
-def _lfs_upload_file(
+def _lfs_upload_content(
     repo_id: str,
     path_in_repo: str,
     local_path: str,
     revision: str,
     token: str,
-    commit_message: Optional[str] = None,
-):
-    """Upload a single LFS file to AI Studio.
+) -> Optional[str]:
+    """Upload LFS file content to BOS storage (no Gitea pointer commit).
+
+    Returns the SHA256 hex digest if successful, or None if skipped.
 
     Flow:
         1. Compute SHA256 + size
         2. Call LFS batch API → get STS token or upload_href
         3. Upload to BOS (multipart with STS, or simple PUT to href)
-        4. Upload LFS pointer to Gitea
     """
     file_size = os.path.getsize(local_path)
     sha = _sha256(local_path)
     user_name, repo_name = repo_id.split("/")
 
-    # Step 1: Get upload access (LFS batch API needs ``vnd.git-lfs+json`` Content-Type)
     resp = _git_api(
         "POST",
         f"/{user_name}/{repo_name}.git/info/lfs/objects/batch",
@@ -599,7 +598,7 @@ def _lfs_upload_file(
 
     if not resp.get("objects"):
         click.echo(f"  ⚠️  {path_in_repo}: no upload actions returned, skipping.")
-        return
+        return None
 
     obj = resp["objects"][0]
     actions = obj.get("actions", {})
@@ -609,68 +608,79 @@ def _lfs_upload_file(
         upload_href = upload_info.get("href", "")
         sts_token = upload_info.get("sts_token", {})
 
-        # Step 2: Upload file content to BOS
         desc = f"{path_in_repo} ({file_size / 1024 / 1024:.1f} MB)"
 
         if sts_token and sts_token.get("bosHost") and file_size > 5 * 1024**3:
-            # Files >5GB: BOS single PUT limit is 5GB, use STS multipart directly.
             _sts_multipart_upload(sts_token, local_path, desc)
         else:
             _http_put(upload_href, local_path, desc)
     else:
         click.echo(f"  ⏭️  {path_in_repo}: content already exists on remote (reusing hash).")
 
-    # Step 3: Upload LFS pointer to Gitea (needed even when content already exists)
-    pointer_content = f"version https://git-lfs.github.com/spec/v1\noid sha256:{sha}\nsize {file_size}\n"
-    pointer_b64 = base64.b64encode(pointer_content.encode()).decode()
-
-    existing_sha = _check_file_exists(repo_id, path_in_repo, revision, token)
-    method = "PUT" if existing_sha else "POST"
-    payload = {
-        "branch": revision,
-        "content": pointer_b64,
-        "lfsPointer": True,
-    }
-    if existing_sha:
-        payload["sha"] = existing_sha
-    if commit_message:
-        payload["message"] = commit_message
-
-    _git_api(method, f"/api/v1/repos/{repo_id}/contents/{path_in_repo}", token, data=payload)
-    click.echo(f"  ✅ {path_in_repo} uploaded.")
+    return sha
 
 
 # ── Regular file flow ────────────────────────────────────────────────
 
 
-def _regular_upload_file(
-    repo_id: str,
-    path_in_repo: str,
+def _regular_upload_content(
     local_path: str,
-    revision: str,
-    token: str,
-    commit_message: Optional[str] = None,
-):
-    """Upload a small file (non-LFS) via Gitea API."""
-    with open(local_path, "rb") as f:
-        content_b64 = base64.b64encode(f.read()).decode()
+) -> None:
+    """Validate a small (non-LFS) file is ready for batch commit.
 
-    existing_sha = _check_file_exists(repo_id, path_in_repo, revision, token)
-    method = "PUT" if existing_sha else "POST"
-    payload = {
-        "branch": revision,
-        "content": content_b64,
-        "lfs": False,
-    }
-    if existing_sha:
-        payload["sha"] = existing_sha
-    if commit_message:
-        payload["message"] = commit_message
-
-    _git_api(method, f"/api/v1/repos/{repo_id}/contents/{path_in_repo}", token, data=payload)
+    Raises if the file is too large for the Gitea contents API.
+    """
+    file_size = os.path.getsize(local_path)
+    if file_size > 5 * 1024 * 1024:
+        raise click.ClickException(f"{local_path}: {file_size} bytes exceeds the 5MB limit for non-LFS upload.")
 
 
 # ── Main upload dispatch ─────────────────────────────────────────────
+
+
+def _get_lfs_map(
+    repo_id: str,
+    revision: str,
+    token: str,
+    items: list[tuple[str, str]],
+) -> dict[str, bool]:
+    """Query AI Studio's preupload API to determine which files must be LFS.
+
+    Respects the repo's ``.gitattributes`` LFS rules (e.g. ``*.zip`` →
+    ``filter=lfs``).  Files not returned by the API default to size-based
+    heuristics (>5MB → LFS).
+
+    Returns a dict mapping ``path_in_repo`` → ``is_lfs``.
+    """
+    user_name, repo_name = repo_id.split("/")
+    host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
+
+    # Build path list
+    path_list = [rel_path for rel_path, _ in items]
+    url = (
+        f"{host}/api/v1/repos/"
+        f"{quote(user_name, safe='')}/{quote(repo_name, safe='')}/preupload/{quote(revision, safe='')}"
+    )
+    params = {"files": [{"path": p} for p in path_list]}
+    headers = _header_fill(token)
+
+    try:
+        resp = requests.post(url, headers=headers, json=params, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            if "files" in data and isinstance(data["files"], list):
+                lfs_map = {}
+                for entry in data["files"]:
+                    path = entry.get("path")
+                    is_lfs = entry.get("lfs", False)
+                    if path:
+                        lfs_map[path] = is_lfs
+                return lfs_map
+    except Exception:
+        pass
+
+    # Fallback: size-based heuristic
+    return {}
 
 
 def _upload_item(
@@ -679,18 +689,93 @@ def _upload_item(
     local_path: str,
     revision: str,
     token: str,
-    commit_message: Optional[str] = None,
-):
-    """Upload a single file, choosing LFS or regular flow."""
-    file_size = os.path.getsize(local_path)
+    is_lfs: bool,
+) -> Optional[tuple]:
+    """Upload a single file's content to BOS (LFS) or validate for batch commit.
 
-    # Files larger than 5MB go through LFS. Small files use Gitea API directly.
-    is_lfs = file_size > int(os.environ.get("OCEAN_UPLOAD_LFS_THRESHOLD", 5 * 1024 * 1024))
+    Returns ``(path_in_repo, local_path, is_lfs, sha256)`` tuple,
+    or ``None`` if the file should be skipped.
+    """
+    file_size = os.path.getsize(local_path)
+    lfs_threshold = int(os.environ.get("OCEAN_UPLOAD_LFS_THRESHOLD", 5 * 1024 * 1024))
+    if not is_lfs and file_size > lfs_threshold:
+        is_lfs = True  # size-based fallback even if API missed it
 
     if is_lfs:
-        _lfs_upload_file(repo_id, path_in_repo, local_path, revision, token, commit_message)
+        sha = _lfs_upload_content(repo_id, path_in_repo, local_path, revision, token)
+        if sha is None:
+            return None
+        return (path_in_repo, local_path, True, sha)
     else:
-        _regular_upload_file(repo_id, path_in_repo, local_path, revision, token, commit_message)
+        _regular_upload_content(local_path)
+        sha = _sha256(local_path)
+        return (path_in_repo, local_path, False, sha)
+
+
+# ── Batch commit ─────────────────────────────────────────────────────
+
+
+def _batch_commit(
+    repo_id: str,
+    revision: str,
+    token: str,
+    commit_message: Optional[str],
+    file_quads: list[tuple[str, str, bool, str]],
+) -> None:
+    """Batch commit LFS pointers and small files to Gitea in one request.
+
+    Uses the batch endpoint ``POST /api/v1/repos/{repo_id}/contents``
+    with ``files: [...]`` — avoids the Gitea 500 error that occurs
+    when creating LFS pointers via the single-file endpoint.
+
+    Args:
+        repo_id: ``username/repo-name``.
+        revision: Branch name.
+        token: AI Studio access token.
+        commit_message: Optional commit message.
+        file_quads: List of ``(path_in_repo, local_path, is_lfs, sha256)`` tuples.
+    """
+    host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
+    headers = _header_fill(token)
+    url = f"{host}/api/v1/repos/{repo_id}/contents"
+
+    author = {"name": "ocean", "email": "ocean@paddleocean.dev"}
+    committer = author
+
+    files = []
+    for path_in_repo, local_path, is_lfs, sha256 in file_quads:
+        if is_lfs:
+            size = os.path.getsize(local_path)
+            pointer = f"version https://git-lfs.github.com/spec/v1\noid sha256:{sha256}\nsize {size}\n"
+            content_b64 = base64.b64encode(pointer.encode()).decode()
+        else:
+            with open(local_path, "rb") as f:
+                content_b64 = base64.b64encode(f.read()).decode()
+
+        existing_sha = _check_file_exists(repo_id, path_in_repo, revision, token)
+        entry = {
+            "lfsPointer": is_lfs,
+            "path": path_in_repo,
+            "content": content_b64,
+            "operation": "update" if existing_sha else "create",
+        }
+        if existing_sha:
+            entry["sha"] = existing_sha
+        files.append(entry)
+
+    payload = {
+        "branch": revision,
+        "message": commit_message or f"Upload {len(files)} file(s) via ocean",
+        "author": author,
+        "committer": committer,
+        "files": files,
+    }
+
+    resp = requests.post(url, headers=headers, json=payload, timeout=120)
+    if resp.status_code // 100 == 2:
+        click.echo(f"  ✅ Committed {len(files)} file(s).")
+    else:
+        raise click.ClickException(f"Batch commit failed [{resp.status_code}]: {resp.text[:200]}")
 
 
 @click.command()
@@ -823,20 +908,36 @@ def upload_folder(
                     items.append((prefix + rel, str(f)))
 
     click.echo(f"  Uploading {len(items)} file(s) to {repo_id}...")
-    errors = []
+    file_quads: list[tuple[str, str, bool, str]] = []
+    errors: list[tuple[str, str]] = []
+
+    # Query repo LFS rules (respects .gitattributes like ``*.zip filter=lfs``)
+    lfs_map = _get_lfs_map(repo_id, revision, token, items)
+
+    # Warn about blocked archive extensions on model repos
+    _blocked_extensions = (".zip", ".rar", ".7z", ".tar")
+    if repo_type == "model":
+        blocked = [p for p, _ in items if os.path.splitext(p)[1].lower() in _blocked_extensions]
+        if blocked:
+            click.echo(
+                "  ⚠️  AI Studio model repos block uploading archive files (.zip/.rar/.7z/.tar)\n"
+                "        through the Gitea API.  Use --path-in-repo with a different\n"
+                "        extension (e.g. filename.bin) to work around this limitation.",
+                err=True,
+            )
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        fut_to_item = {
-            pool.submit(_upload_item, repo_id, rel_path, abs_path, revision, token, commit_message): (
-                rel_path,
-                abs_path,
-            )
-            for rel_path, abs_path in items
-        }
+        fut_to_item = {}
+        for rel_path, abs_path in items:
+            is_lfs = lfs_map.get(rel_path, False)
+            fut = pool.submit(_upload_item, repo_id, rel_path, abs_path, revision, token, is_lfs)
+            fut_to_item[fut] = (rel_path, abs_path)
         for future in as_completed(fut_to_item):
             rel_path, abs_path = fut_to_item[future]
             try:
-                future.result()
+                result = future.result()
+                if result is not None:
+                    file_quads.append(result)
             except Exception as e:
                 click.echo(f"  ❌ {rel_path}: {e}")
                 errors.append((rel_path, str(e)))
@@ -846,5 +947,15 @@ def upload_folder(
         for rel_path, err in errors:
             click.echo(f"    ❌ {rel_path}: {err}")
         raise click.ClickException(f"{len(errors)} file(s) failed to upload.")
+
+    # Batch commit all uploaded files
+    if file_quads:
+        click.echo(f"  Committing {len(file_quads)} file(s)...")
+        try:
+            _batch_commit(repo_id, revision, token, commit_message, file_quads)
+        except Exception as e:
+            raise click.ClickException(f"Commit failed: {e}")
     else:
-        click.echo(f"  ✅ Done. All files uploaded to {repo_id}")
+        click.echo("  No files to commit.")
+
+    click.echo(f"  ✅ Done. All files uploaded to {repo_id}")
