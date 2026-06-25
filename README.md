@@ -7,7 +7,7 @@
 [![简体中文](https://img.shields.io/badge/lang-简体中文-blue.svg)](README.zh-CN.md)
 [![繁體中文](https://img.shields.io/badge/lang-繁體中文-green.svg)](README.zh-TW.md)
 
-# 🌊 paddleOcean
+# 🌊 PaddleOcean
 
 **A high-level PaddlePaddle framework inspired by PyTorch Lightning**
 
@@ -15,9 +15,9 @@ Trainer · Model · Callbacks · Loggers · DDP · Gear · VisualDL
 
 ---
 
-## Why paddleOcean?
+## Why PaddleOcean?
 
-paddleOcean maps every core component of PyTorch Lightning to PaddlePaddle's native API, with zero PyTorch dependencies. If you know Lightning, you already know paddleOcean.
+PaddleOcean maps every core component of PyTorch Lightning to PaddlePaddle's native API, with zero PyTorch dependencies. If you know Lightning, you already know PaddleOcean.
 
 **Lightning-style hooks:**
 
@@ -49,7 +49,7 @@ trainer.fit(model, train_loader, val_loader)
 ```python
 net = paddle.nn.Sequential(...)
 model = ocean.Model(__model__=net)
-model.compile(optimizer=opt, loss=loss_fn, metrics=[acc])
+model.prepare(optimizer=opt, loss=loss_fn, metrics=[acc])
 model.fit(train_loader, epochs=10)
 ```
 

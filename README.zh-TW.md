@@ -7,15 +7,15 @@
 [![简体中文](https://img.shields.io/badge/lang-简体中文-blue.svg)](README.zh-CN.md)
 [![繁體中文](https://img.shields.io/badge/lang-繁體中文-green.svg)](README.zh-TW.md)
 
-# 🌊 paddleOcean
+# 🌊 PaddleOcean
 
 > 對標 PyTorch Lightning 的 PaddlePaddle 高層框架 — Trainer · Model · Callbacks · Loggers · DDP · Gear · VisualDL。全部使用 PaddlePaddle 原生 API，零 PyTorch 依賴。
 
 ---
 
-## 為什麼用 paddleOcean？
+## 為什麼用 PaddleOcean？
 
-如果你用過 PyTorch Lightning，可以直接上手 paddleOcean。每個核心模組都映射到 PaddlePaddle 的對應 API。
+如果你用過 PyTorch Lightning，可以直接上手 PaddleOcean。每個核心模組都映射到 PaddlePaddle 的對應 API。
 
 **Lightning 風格鉤子：**
 
@@ -47,7 +47,7 @@ trainer.fit(model, train_loader, val_loader)
 ```python
 net = paddle.nn.Sequential(...)
 model = ocean.Model(__model__=net)
-model.compile(optimizer=opt, loss=loss_fn, metrics=[acc])
+model.prepare(optimizer=opt, loss=loss_fn, metrics=[acc])
 model.fit(train_loader, epochs=10)
 ```
 
