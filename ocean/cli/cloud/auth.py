@@ -21,7 +21,11 @@ def save_token(token: str) -> None:
 
 
 def get_token() -> str:
-    """Read AI Studio token from env or local file."""
+    """Read AI Studio token from env or local file.
+
+    Raises:
+        click.ClickException: If no token is found.
+    """
     token = os.environ.get("AISTUDIO_ACCESS_TOKEN")
     if token:
         return token
@@ -31,6 +35,16 @@ def get_token() -> str:
         "No AI Studio token found. Run 'ocean cloud login --token YOUR_TOKEN' first, "
         "or set AISTUDIO_ACCESS_TOKEN environment variable."
     )
+
+
+def get_token_optional() -> str | None:
+    """Read AI Studio token, returning None if none is configured."""
+    token = os.environ.get("AISTUDIO_ACCESS_TOKEN")
+    if token:
+        return token
+    if TOKEN_FILE.exists():
+        return TOKEN_FILE.read_text().strip()
+    return None
 
 
 def clear_token() -> None:

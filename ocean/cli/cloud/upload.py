@@ -369,17 +369,16 @@ def _sha256(filepath: str, desc: str = "") -> str:
     return h.hexdigest()
 
 
-def _header_fill(token: str, extra: Optional[dict] = None) -> dict:
-    h = {
-        "Content-Type": "application/json",
-        "Authorization": f"token {token}",
-    }
+def _header_fill(token: str | None, extra: Optional[dict] = None) -> dict:
+    h = {"Content-Type": "application/json"}
+    if token:
+        h["Authorization"] = f"token {token}"
     if extra:
         h.update(extra)
     return h
 
 
-def _git_api(method: str, path: str, token: str, data=None, content_type: Optional[str] = None) -> dict:
+def _git_api(method: str, path: str, token: str | None, data=None, content_type: Optional[str] = None) -> dict:
     """Call AI Studio Gitea API (serialized via module-level lock).
 
     Retries on network errors (timeout / connection / SSL) and transient
