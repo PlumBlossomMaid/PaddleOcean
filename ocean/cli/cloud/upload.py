@@ -30,12 +30,12 @@ warnings.filterwarnings("ignore", message=".*urllib3.*")
 warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*")
 warnings.filterwarnings("ignore", category=Warning, message=".*urllib3.*")
 
-import click
-import requests
+import click  # noqa: E402
+import requests  # noqa: E402
 
-from ocean.cli.cloud import _config
-from ocean.cli.cloud.auth import get_token
-from ocean.utils.colored_tqdm import ColoredTqdm
+from ocean.cli.cloud import _config  # noqa: E402
+from ocean.cli.cloud.auth import get_token  # noqa: E402
+from ocean.utils.colored_tqdm import ColoredTqdm  # noqa: E402
 
 # ── Gitea API serialization ─────────────────────────────────────────
 # Gitea returns 500 under concurrent requests; serialize all API calls.
