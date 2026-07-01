@@ -24,16 +24,35 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlparse
 
-import click
-import requests
+import click  # noqa: E402
+import requests  # noqa: E402
 
-from ocean.cli.cloud import _config
-from ocean.cli.cloud.auth import get_token
-from ocean.utils.colored_tqdm import ColoredTqdm
+from ocean.cli.cloud import _config  # noqa: E402
+from ocean.cli.cloud.auth import get_token  # noqa: E402
+from ocean.utils.colored_tqdm import ColoredTqdm  # noqa: E402
 
 # ── Gitea API serialization ─────────────────────────────────────────
 # Gitea returns 500 under concurrent requests; serialize all API calls.
 _gitea_lock = threading.Lock()
+
+# ── Thread-local tqdm position counter ──────────────────────────────
+# Prevents parallel tqdm instances (from concurrent SHA256 / upload)
+# from clashing on the same terminal line.
+_tqdm_pos_lock = threading.Lock()
+_tqdm_pos_counter = 0
+_thread_tqdm_pos = threading.local()
+
+
+def _next_tqdm_position() -> int:
+    """Assign a unique terminal line position for each parallel tqdm bar."""
+    global _tqdm_pos_counter
+    if not hasattr(_thread_tqdm_pos, "pos"):
+        with _tqdm_pos_lock:
+            pos = _tqdm_pos_counter
+            _tqdm_pos_counter += 1
+            _thread_tqdm_pos.pos = pos
+    return _thread_tqdm_pos.pos
+
 
 # ── Retryable network exceptions ────────────────────────────────────
 _RETRYABLE_EXCEPTIONS = (
@@ -355,6 +374,7 @@ class BosRestClient:
 def _sha256(filepath: str, desc: str = "") -> str:
     h = hashlib.sha256()
     file_size = os.path.getsize(filepath)
+    tqdm_pos = _next_tqdm_position()
     with open(filepath, "rb") as f:
         with ColoredTqdm(
             total=file_size,
@@ -362,6 +382,7 @@ def _sha256(filepath: str, desc: str = "") -> str:
             unit_scale=True,
             desc=f"  🔑 {desc}" if desc else "  🔑 SHA256",
             leave=False,
+            position=tqdm_pos,
         ) as pbar:
             for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
                 h.update(chunk)
@@ -416,6 +437,70 @@ def _git_api(method: str, path: str, token: str | None, data=None, content_type:
         raise click.ClickException(f"Git API error [{resp.status_code}]: {resp.text[:200]}")
 
 
+def _estimate_commit_entry_size(quad: tuple) -> int:
+    """Estimate the byte size of a file's entry in the batch commit payload.
+
+    - LFS files: pointer text + JSON overhead ≈ 500 bytes
+    - Small files (<5MB): base64-encoded content + JSON overhead
+    """
+    path_in_repo, local_path, is_lfs, _ = quad
+    if is_lfs:
+        return 500
+    file_size = os.path.getsize(local_path)
+    return int(file_size * 1.37) + 200  # base64 overhead + JSON envelope
+
+
+def _split_batches(file_quads: list, batch: str | int | None) -> list[list]:
+    """Split file_quads into commit batches.
+
+    Args:
+        file_quads: Full list of upload results.
+        batch: ``"all"`` → single batch; ``int`` → N per batch;
+               ``"auto"`` → estimate payload, split at ~5 MB each.
+               ``None`` → ``"all"`` (backward compatible default).
+
+    Returns:
+        List of batches, each a sublist of file_quads.
+    """
+    if batch is None or batch == "all" or batch == 0 or batch == "0":
+        return [file_quads]
+
+    if isinstance(batch, int) or (isinstance(batch, str) and batch.isdigit()):
+        n = int(batch)
+        return [file_quads[i : i + n] for i in range(0, len(file_quads), n)]
+
+    if batch == "auto":
+        max_payload = 5 * 1024 * 1024  # 5 MB — commit POST 体量上限
+        max_file_size = 20 * 1024**3  # 20 GB — 一批内原始文件总大小上限
+        max_file_count = 200  # 200 个 — 一批内文件数量上限
+        batches: list[list] = []
+        current: list = []
+        current_payload = 0
+        current_file_size = 0
+        for quad in file_quads:
+            est = _estimate_commit_entry_size(quad)
+            _, local_path, _, _ = quad
+            raw_size = os.path.getsize(local_path)
+            # 超过任一上限就切一批
+            if current and (
+                current_payload + est > max_payload
+                or current_file_size + raw_size > max_file_size
+                or len(current) >= max_file_count
+            ):
+                batches.append(current)
+                current = []
+                current_payload = 0
+                current_file_size = 0
+            current.append(quad)
+            current_payload += est
+            current_file_size += raw_size
+        if current:
+            batches.append(current)
+        return batches
+
+    raise click.ClickException(f"Invalid --batch value: {batch!r} (expected int, 'auto', or 'all')")
+
+
 def _check_file_exists(repo_id: str, path_in_repo: str, revision: str, token: str):
     """Check if a file exists in the repo, return sha if it does."""
     host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
@@ -443,6 +528,7 @@ def _http_put(url: str, local_path: str, desc: str) -> None:
     exponential backoff up to 3 attempts.
     """
     file_size = os.path.getsize(local_path)
+    tqdm_pos = _next_tqdm_position()
 
     def _do_upload():
         def _iter_upload():
@@ -453,6 +539,7 @@ def _http_put(url: str, local_path: str, desc: str) -> None:
                     unit_scale=True,
                     desc=f"  ☁️  {desc}",
                     leave=False,
+                    position=tqdm_pos,
                 ) as pbar:
                     while True:
                         chunk = f.read(8 * 1024 * 1024)
@@ -786,6 +873,11 @@ def _batch_commit(
 @click.option("--token", default=None, help="AI Studio access token.")
 @click.option("--max-workers", default=4, type=int, help="Parallel upload workers.")
 @click.option("--commit-message", default=None, help="Commit message.")
+@click.option(
+    "--batch",
+    default="auto",
+    help="Commit batch size. int=N → N files per commit, 'auto' → smart split (default), 'all' → one commit.",
+)
 def upload(
     repo_id: str,
     local_paths: tuple[str, ...],
@@ -795,6 +887,7 @@ def upload(
     token: Optional[str],
     max_workers: int,
     commit_message: Optional[str],
+    batch: Optional[str],
 ):
     """Upload file(s) or folder(s) to AI Studio.
 
@@ -803,6 +896,12 @@ def upload(
     LOCAL_PATHS: One or more local files or folders to upload.
                    Pass multiple paths separated by spaces.
 
+    \b
+    --batch: Commit batch size.
+        N        → N files per commit (e.g. --batch 50)
+        auto     → auto-split based on estimated payload size (default)
+        all      → one commit for all files
+
     Examples:
 
         ocean cloud upload PlumBlossom/MyDataset ./data.zip
@@ -810,6 +909,10 @@ def upload(
         ocean cloud upload PlumBlossom/MyDataset ./part1.zip ./part2.zip ./part3.zip
 
         ocean cloud upload PlumBlossom/MyModel ./checkpoints/ --repo-type model
+
+        ocean cloud upload PlumBlossom/MyData ./data/ --batch 50
+
+        ocean cloud upload PlumBlossom/MyData ./data/ --batch auto
     """
     upload_folder(
         repo_id=repo_id,
@@ -820,6 +923,7 @@ def upload(
         token=token or get_token(),
         max_workers=max_workers,
         commit_message=commit_message,
+        batch=batch,
     )
 
 
@@ -834,6 +938,7 @@ def upload_file(
     revision: str = "master",
     token: Optional[str] = None,
     commit_message: Optional[str] = None,
+    batch: str = "auto",
 ) -> None:
     """Upload a single file to AI Studio.
 
@@ -845,6 +950,7 @@ def upload_file(
         revision: Branch name.
         token: AI Studio access token. Falls back to env/login.
         commit_message: Optional commit message.
+        batch: Commit batch size. ``"50"``, ``"auto"`` (default), or ``"all"``.
 
     Examples:
         >>> upload_file("PlumBlossom/MyData", "./17LiYuan.zip", repo_type="dataset")
@@ -858,6 +964,7 @@ def upload_file(
         token=token,
         max_workers=1,
         commit_message=commit_message,
+        batch=batch,
     )
 
 
@@ -870,6 +977,7 @@ def upload_folder(
     token: Optional[str] = None,
     max_workers: int = 4,
     commit_message: Optional[str] = None,
+    batch: str = "auto",
 ) -> None:
     """Upload file(s) or folder(s) to AI Studio.
 
@@ -882,13 +990,18 @@ def upload_folder(
         token: AI Studio access token. Falls back to env/login.
         max_workers: Parallel upload threads.
         commit_message: Optional commit message.
+        batch: Commit batch size. ``"50"``, ``"auto"`` (default), or ``"all"``.
 
     Examples:
         >>> upload_folder("PlumBlossom/MyData", "./data_dir/")
-        >>> upload_folder("PlumBlossom/MyData", ["./part1.zip", "./part2.zip"])
+        >>> upload_folder("PlumBlossom/MyData", ["./part1.zip", "./part2.zip"], batch="50")
     """
     if isinstance(local_paths, str):
         local_paths = [local_paths]
+
+    # Reset tqdm position counter for this upload session
+    global _tqdm_pos_counter
+    _tqdm_pos_counter = 0
 
     token = token or get_token()
     _config.validate_repo_id(repo_id)
@@ -941,19 +1054,30 @@ def upload_folder(
                 click.echo(f"  ❌ {rel_path}: {e}")
                 errors.append((rel_path, str(e)))
 
+    # Clear any dangling tqdm lines left over from parallel bars
+    click.echo("", err=False)
+
     if errors:
         click.echo(f"\n  Done with {len(errors)} error(s):")
         for rel_path, err in errors:
             click.echo(f"    ❌ {rel_path}: {err}")
         raise click.ClickException(f"{len(errors)} file(s) failed to upload.")
 
-    # Batch commit all uploaded files
+    # Commit in batches
     if file_quads:
-        click.echo(f"  Committing {len(file_quads)} file(s)...")
-        try:
-            _batch_commit(repo_id, revision, token, commit_message, file_quads)
-        except Exception as e:
-            raise click.ClickException(f"Commit failed: {e}")
+        batches = _split_batches(file_quads, batch)
+        total_batches = len(batches)
+        for i, chunk in enumerate(batches, 1):
+            msg = commit_message or f"Upload {len(chunk)} file(s) via ocean"
+            if total_batches > 1:
+                batch_label = f" (batch {i}/{total_batches})"
+            else:
+                batch_label = ""
+            click.echo(f"  Committing {len(chunk)} file(s){batch_label}...")
+            try:
+                _batch_commit(repo_id, revision, token, msg, chunk)
+            except Exception as e:
+                raise click.ClickException(f"Commit failed{batch_label}: {e}")
     else:
         click.echo("  No files to commit.")
 

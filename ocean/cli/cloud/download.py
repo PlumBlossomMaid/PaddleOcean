@@ -12,7 +12,9 @@ import json
 import os
 import re
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -22,6 +24,7 @@ import requests
 
 from ocean.cli.cloud import _config
 from ocean.cli.cloud.auth import get_token_optional
+from ocean.cli.cloud.list import list_files
 from ocean.cli.cloud.upload import ColoredTqdm, _git_api, _header_fill
 
 # ── Download manifest (persistent cache index) ──────────────────────
@@ -46,7 +49,7 @@ def _save_manifest(dest_dir: Path, manifest: dict):
     path = dest_dir / _MANIFEST_NAME
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.rename(path)
+    os.replace(str(tmp), str(path))
 
 
 def _is_cached(dest_dir: Path, file_path: str, expected_sha: str) -> bool:
@@ -81,6 +84,51 @@ def _auth_hint():
         "  Run 'ocean cloud login --token YOUR_TOKEN' first, "
         "or set AISTUDIO_ACCESS_TOKEN environment variable."
     )
+
+
+def _resolve_repo_paths(files: list[dict], root_items: list[str]) -> list[str]:
+    """Resolve correct repo-relative paths from git/trees entries.
+
+    AI Studio Gitea may return full server-side paths (e.g.
+    ``code/home/aistudio/.../repo/file.py``) instead of repo-relative
+    paths.  We use the Contents API (``list``) as a trusted reference:
+    if every git/trees path ends with a known root-level entry name, we
+    can correctly determine where the repo structure starts.
+
+    Args:
+        files: List of file info dicts from ``_list_all_files``.
+        root_items: Known root-level entry names from the Contents API.
+
+    Returns:
+        List of corrected repo-relative paths in the same order as
+        ``files``.
+    """
+    if not files or not root_items:
+        # No reference to correct against — return paths as-is
+        return [f["path"] for f in files]
+
+    # Build a set of root-level names for fast lookup.
+    # Only consider entries that actually appear in the git/trees paths.
+    root_set = set(root_items)
+
+    resolved = []
+    for entry in files:
+        path = entry["path"]
+        parts = path.split("/")
+        # Walk from the end of the path backwards — the first component
+        # that matches a root entry name is the start of the repo
+        # structure.
+        matched = -1
+        for i in range(len(parts) - 1, -1, -1):
+            if parts[i] in root_set:
+                matched = i
+                break
+        if matched >= 0:
+            resolved.append("/".join(parts[matched:]))
+        else:
+            # Fallback: keep the original path
+            resolved.append(path)
+    return resolved
 
 
 def _list_all_files(repo_id: str, revision: str, token: str | None):
@@ -339,16 +387,28 @@ def download(
 
         _echo(f"  Found {len(files)} file(s), downloading with {max_workers} workers ...")
 
+        # Resolve correct repo-relative paths via Contents API reference
+        try:
+            root_items = [
+                item["name"] for item in list_files(repo_id, repo_type=repo_type, revision=revision, token=token)
+            ]
+            resolved_paths = _resolve_repo_paths(files, root_items)
+        except (requests.RequestException, JSONDecodeError, KeyError, IndexError) as e:
+            _echo(f"  ⚠️  Failed to resolve repo paths ({e}), falling back to raw paths.")
+            resolved_paths = [f["path"] for f in files]
+        for entry, local_rel in zip(files, resolved_paths):
+            entry["_local_rel"] = local_rel
+
         def _download_one(entry: dict) -> tuple[str, bool]:
             """Download a single file. Returns (path, success)."""
-            file_path = entry["path"]
-            local_path = dest / file_path
+            local_rel = entry["_local_rel"]
+            local_path = dest / local_rel
             expected_size = entry.get("size")
             expected_sha = entry.get("sha")
             try:
                 _download_file_with_lfs(
                     repo_id,
-                    file_path,
+                    local_rel,
                     str(local_path),
                     token,
                     dest_dir=dest,
@@ -356,9 +416,12 @@ def download(
                     expected_size=expected_size,
                     expected_sha=expected_sha,
                 )
-                return file_path, True
-            except Exception:
-                return file_path, False
+                return local_rel, True
+            except Exception as e:
+                _echo(f"  ✗ {local_rel}")
+                _echo(f"    {e}")
+                traceback.print_exc()
+                return local_rel, False
 
         success = 0
         failed = 0
