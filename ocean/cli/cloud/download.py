@@ -12,6 +12,7 @@ import json
 import os
 import re
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
@@ -81,6 +82,32 @@ def _auth_hint():
         "  Run 'ocean cloud login --token YOUR_TOKEN' first, "
         "or set AISTUDIO_ACCESS_TOKEN environment variable."
     )
+
+
+def _strip_common_prefix(paths):
+    """Strip common leading path components across all paths.
+
+    AI Studio Gitea may return full server-side paths
+    (e.g. ``code/home/aistudio/.../repo/file.py``) instead of
+    repo-relative paths.  This function detects the common prefix and
+    strips it so that the local directory tree mirrors the actual repo
+    structure.
+    """
+    if not paths:
+        return paths, ""
+    parts = [p.split("/") for p in paths]
+    min_len = min(len(p) for p in parts)
+    common = []
+    for i in range(min_len):
+        if all(p[i] == parts[0][i] for p in parts):
+            common.append(parts[0][i])
+        else:
+            break
+    prefix = "/".join(common)
+    if prefix:
+        stripped = [p[len(prefix) + 1:] for p in paths]
+        return stripped, prefix + "/"
+    return list(paths), ""
 
 
 def _list_all_files(repo_id: str, revision: str, token: str | None):
@@ -339,16 +366,22 @@ def download(
 
         _echo(f"  Found {len(files)} file(s), downloading with {max_workers} workers ...")
 
+        all_paths = [f["path"] for f in files]
+        stripped_paths, _ = _strip_common_prefix(all_paths)
+        for entry, local_rel in zip(files, stripped_paths):
+            entry["_local_rel"] = local_rel
+
         def _download_one(entry: dict) -> tuple[str, bool]:
             """Download a single file. Returns (path, success)."""
             file_path = entry["path"]
-            local_path = dest / file_path
+            local_rel = entry["_local_rel"]
+            local_path = dest / local_rel
             expected_size = entry.get("size")
             expected_sha = entry.get("sha")
             try:
                 _download_file_with_lfs(
                     repo_id,
-                    file_path,
+                    local_rel,
                     str(local_path),
                     token,
                     dest_dir=dest,
@@ -356,9 +389,12 @@ def download(
                     expected_size=expected_size,
                     expected_sha=expected_sha,
                 )
-                return file_path, True
-            except Exception:
-                return file_path, False
+                return local_rel, True
+            except Exception as e:
+                _echo(f"  ✗ {local_rel}")
+                _echo(f"    {e}")
+                traceback.print_exc()
+                return local_rel, False
 
         success = 0
         failed = 0
