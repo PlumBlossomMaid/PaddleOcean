@@ -23,6 +23,7 @@ import requests
 
 from ocean.cli.cloud import _config
 from ocean.cli.cloud.auth import get_token_optional
+from ocean.cli.cloud.list import list_files
 from ocean.cli.cloud.upload import ColoredTqdm, _git_api, _header_fill
 
 # ── Download manifest (persistent cache index) ──────────────────────
@@ -84,30 +85,49 @@ def _auth_hint():
     )
 
 
-def _strip_common_prefix(paths):
-    """Strip common leading path components across all paths.
+def _resolve_repo_paths(files: list[dict], root_items: list[str]) -> list[str]:
+    """Resolve correct repo-relative paths from git/trees entries.
 
-    AI Studio Gitea may return full server-side paths
-    (e.g. ``code/home/aistudio/.../repo/file.py``) instead of
-    repo-relative paths.  This function detects the common prefix and
-    strips it so that the local directory tree mirrors the actual repo
-    structure.
+    AI Studio Gitea may return full server-side paths (e.g.
+    ``code/home/aistudio/.../repo/file.py``) instead of repo-relative
+    paths.  We use the Contents API (``list``) as a trusted reference:
+    if every git/trees path ends with a known root-level entry name, we
+    can correctly determine where the repo structure starts.
+
+    Args:
+        files: List of file info dicts from ``_list_all_files``.
+        root_items: Known root-level entry names from the Contents API.
+
+    Returns:
+        List of corrected repo-relative paths in the same order as
+        ``files``.
     """
-    if not paths:
-        return paths, ""
-    parts = [p.split("/") for p in paths]
-    min_len = min(len(p) for p in parts)
-    common = []
-    for i in range(min_len):
-        if all(p[i] == parts[0][i] for p in parts):
-            common.append(parts[0][i])
+    if not files or not root_items:
+        # No reference to correct against — return paths as-is
+        return [f["path"] for f in files]
+
+    # Build a set of root-level names for fast lookup.
+    # Only consider entries that actually appear in the git/trees paths.
+    root_set = set(root_items)
+
+    resolved = []
+    for entry in files:
+        path = entry["path"]
+        parts = path.split("/")
+        # Walk from the end of the path backwards — the first component
+        # that matches a root entry name is the start of the repo
+        # structure.
+        matched = -1
+        for i in range(len(parts) - 1, -1, -1):
+            if parts[i] in root_set:
+                matched = i
+                break
+        if matched >= 0:
+            resolved.append("/".join(parts[matched:]))
         else:
-            break
-    prefix = "/".join(common)
-    if prefix:
-        stripped = [p[len(prefix) + 1:] for p in paths]
-        return stripped, prefix + "/"
-    return list(paths), ""
+            # Fallback: keep the original path
+            resolved.append(path)
+    return resolved
 
 
 def _list_all_files(repo_id: str, revision: str, token: str | None):
@@ -366,9 +386,18 @@ def download(
 
         _echo(f"  Found {len(files)} file(s), downloading with {max_workers} workers ...")
 
-        all_paths = [f["path"] for f in files]
-        stripped_paths, _ = _strip_common_prefix(all_paths)
-        for entry, local_rel in zip(files, stripped_paths):
+        # Resolve correct repo-relative paths via Contents API reference
+        try:
+            root_items = [
+                item["name"] for item in list_files(
+                    repo_id, repo_type=repo_type, revision=revision, token=token
+                )
+            ]
+            resolved_paths = _resolve_repo_paths(files, root_items)
+        except Exception:
+            # Fallback: use raw paths
+            resolved_paths = [f["path"] for f in files]
+        for entry, local_rel in zip(files, resolved_paths):
             entry["_local_rel"] = local_rel
 
         def _download_one(entry: dict) -> tuple[str, bool]:
