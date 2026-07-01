@@ -372,6 +372,23 @@ def _download_file_with_lfs(
                 file_size = int(size_match.group(1))
                 _lfs_download_real(repo_id, oid, file_size, token, str(local_path_obj), desc=file_path)
 
+                # Verify LFS content SHA against OID
+                import hashlib
+
+                actual = hashlib.sha256(local_path_obj.read_bytes()).hexdigest()
+                if actual != oid:
+                    local_path_obj.unlink(missing_ok=True)
+                    raise ValueError(f"SHA256 mismatch for {file_path} (LFS content): expected {oid}, got {actual}")
+    else:
+        # Verify regular file SHA against git blob SHA
+        if expected_sha:
+            import hashlib
+
+            actual = hashlib.sha256(local_path_obj.read_bytes()).hexdigest()
+            if actual != expected_sha:
+                local_path_obj.unlink(missing_ok=True)
+                raise ValueError(f"SHA256 mismatch for {file_path}: expected {expected_sha}, got {actual}")
+
     # Mark as cached in manifest
     if expected_sha and dest_dir:
         _mark_cached(dest_dir, file_path, expected_sha)
