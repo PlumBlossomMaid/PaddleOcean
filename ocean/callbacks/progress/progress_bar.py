@@ -85,22 +85,15 @@ class TQDMProgressBar(ProgressBar):
 
     @staticmethod
     def get_metrics(trainer: Any, model: Any) -> dict[str, Any]:
-        """Get metrics for progress bar display.
+        """Get metrics for progress bar display. Raw values (Lightning-compatible).
 
-        Only shows metrics logged with prog_bar=True (DiffSinger-compatible).
-        Formats floats with smart precision.
+        Only shows metrics logged with prog_bar=True.
+        tqdm handles formatting natively — ints stay ints, floats are auto-formatted.
         """
         items = dict(trainer.progress_bar_metrics)
         for k, v in list(items.items()):
-            if isinstance(v, float):
-                if np.isnan(v):
-                    items[k] = "nan"
-                elif 0.001 <= abs(v) < 10:
-                    items[k] = f"{v:.4f}"
-                elif abs(v) < 0.001:
-                    items[k] = f"{v:.4e}"
-                else:
-                    items[k] = f"{v:.2f}"
+            if isinstance(v, float) and np.isnan(v):
+                items[k] = "nan"
         return items
 
     def on_train_epoch_start(self, trainer: Any, model: Any) -> None:

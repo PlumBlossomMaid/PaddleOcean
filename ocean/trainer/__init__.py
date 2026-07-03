@@ -644,7 +644,7 @@ class Trainer:
                 cache_val = _pm_squeeze(value._forward_cache)
                 if hasattr(cache_val, "item"):
                     cache_val = cache_val.item()
-                self._logger_connector.log_metric_value(name, float(cache_val), prog_bar=prog_bar, logger=logger)
+                self._logger_connector.log_metric_value(name, cache_val, prog_bar=prog_bar, logger=logger)
             return
 
         # ── Scalar / Tensor path ─────────────────────────────────────
@@ -673,7 +673,7 @@ class Trainer:
         if epoch_log:
             self._log_metrics_buffer[name].append(value)
         if step_log:
-            self._logger_connector.log_metric_value(name, float(value), prog_bar=prog_bar, logger=logger)
+            self._logger_connector.log_metric_value(name, value, prog_bar=prog_bar, logger=logger)
 
     def _compute_epoch_metrics(self) -> None:
         """Reduce buffered metrics into epoch-level values.
