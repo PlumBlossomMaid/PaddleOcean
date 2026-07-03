@@ -91,6 +91,8 @@ class TQDMProgressBar(ProgressBar):
         tqdm handles formatting natively — ints stay ints, floats are auto-formatted.
         """
         items = dict(trainer.progress_bar_metrics)
+        if "steps" not in items:
+            items["steps"] = trainer.dataloader_step
         for k, v in list(items.items()):
             if isinstance(v, float) and np.isnan(v):
                 items[k] = "nan"
@@ -120,7 +122,7 @@ class TQDMProgressBar(ProgressBar):
             self._train_tqdm.update(1)
             metrics = self.get_metrics(trainer, model)
             if metrics:
-                self._train_tqdm.set_postfix(**metrics, refresh=False)
+                self._train_tqdm.set_postfix(**metrics)
 
     def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
         if self._train_tqdm is not None:

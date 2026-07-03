@@ -124,7 +124,7 @@ class _FitLoop(_Loop):
                 _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
                 self.batch_progress.increment_completed()
 
-                if trainer._should_check_val_step(trainer.dataloader_step):
+                if trainer._should_check_val_step(batch_idx):
                     self._run_validation()
 
                 if 0 < trainer.max_steps <= trainer.dataloader_step:
@@ -153,9 +153,6 @@ class _FitLoop(_Loop):
             _call_callback_hooks(trainer, "on_train_epoch_end")
 
             trainer.current_epoch += 1
-
-            if trainer._should_check_val():
-                self._run_validation()
 
             if trainer._should_stop():
                 break
