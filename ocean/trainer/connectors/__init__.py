@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 import paddle
 
+import ocean
 from ocean.callbacks.callback import Callback
 from ocean.callbacks.checkpoint import ModelCheckpoint
 from ocean.loggers.base import Logger
@@ -234,6 +235,12 @@ class _CheckpointConnector:
                     if name in ckpt["callbacks"] and hasattr(cb, "load_state_dict"):
                         cb.load_state_dict(ckpt["callbacks"][name])
 
+            if self.trainer.strategy is not None:
+                pp = self.trainer.strategy.precision_plugin
+                pname = type(pp).__qualname__
+                if pname in ckpt and hasattr(pp, "load_state_dict"):
+                    pp.load_state_dict(ckpt[pname])
+
         if "epoch" in ckpt:
             self.trainer.current_epoch = ckpt["epoch"]
         if "dataloader_step" in ckpt:
@@ -248,6 +255,7 @@ class _CheckpointConnector:
         """Build a complete checkpoint dictionary."""
         model = self.trainer._model
         checkpoint = {
+            "ocean_version": ocean.__version__,
             "epoch": self.trainer.current_epoch,
             "dataloader_step": self.trainer.dataloader_step,
             "optimizer_step": self.trainer.optimizer_step,
@@ -264,6 +272,25 @@ class _CheckpointConnector:
 
         if self.trainer._lr_schedulers:
             checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in self.trainer._lr_schedulers]
+
+        if hasattr(model, "on_save_checkpoint"):
+            checkpoint.update(model.on_save_checkpoint())
+
+        if self.trainer.strategy is not None:
+            pp = self.trainer.strategy.precision_plugin
+            if pp is not None and hasattr(pp, "state_dict"):
+                ps = pp.state_dict()
+                if ps:
+                    checkpoint[type(pp).__qualname__] = ps
+
+        if self.trainer.datamodule is not None:
+            if hasattr(self.trainer.datamodule, "state_dict"):
+                ds = self.trainer.datamodule.state_dict()
+                if ds:
+                    checkpoint[type(self.trainer.datamodule).__qualname__] = ds
+
+        if hasattr(model, "hparams") and model.hparams:
+            checkpoint["hparams"] = model.hparams
 
         callback_states = {}
         for cb in self.trainer.callbacks:

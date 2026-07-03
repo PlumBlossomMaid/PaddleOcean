@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 import paddle
 
+import ocean
 from ocean.callbacks.callback import Callback
 
 
@@ -123,6 +124,7 @@ class ModelCheckpoint(Callback):
         else:
             trainer = model._trainer
             checkpoint = {
+                "ocean_version": ocean.__version__,
                 "state_dict": model.state_dict(),
                 "epoch": trainer.current_epoch if trainer else 0,
                 "dataloader_step": trainer.dataloader_step if trainer else 0,
@@ -132,12 +134,34 @@ class ModelCheckpoint(Callback):
                 raw_opt = trainer.optimizers[0]._optimizer
                 if raw_opt is not None:
                     checkpoint["optimizer_states"] = [raw_opt.state_dict()]
+
             if trainer and hasattr(trainer, "fit_loop"):
                 loop_state = trainer.fit_loop.state_dict()
                 if loop_state:
                     checkpoint["loops"] = loop_state
+
             if trainer and trainer._lr_schedulers:
                 checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in trainer._lr_schedulers]
+
+            if hasattr(model, "on_save_checkpoint"):
+                checkpoint.update(model.on_save_checkpoint())
+
+            if trainer and trainer.strategy is not None:
+                pp = trainer.strategy.precision_plugin
+                if pp is not None and hasattr(pp, "state_dict"):
+                    ps = pp.state_dict()
+                    if ps:
+                        checkpoint[type(pp).__qualname__] = ps
+
+            if trainer and trainer.datamodule is not None:
+                if hasattr(trainer.datamodule, "state_dict"):
+                    ds = trainer.datamodule.state_dict()
+                    if ds:
+                        checkpoint[type(trainer.datamodule).__qualname__] = ds
+
+            if hasattr(model, "hparams") and model.hparams:
+                checkpoint["hparams"] = model.hparams
+
             callback_states = {}
             for cb in trainer.callbacks if trainer else []:
                 if hasattr(cb, "state_dict"):

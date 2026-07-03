@@ -399,6 +399,14 @@ class Model(nn.Layer):
         else:
             self.set_dict(state_dict)
 
+    def on_save_checkpoint(self) -> dict[str, Any]:
+        """Hook for adding custom state to checkpoint.
+
+        Returns:
+            Dictionary of custom state to include in the checkpoint.
+        """
+        return {}
+
     def save_checkpoint(self, path: str) -> None:
         """Save model checkpoint to path.
 
