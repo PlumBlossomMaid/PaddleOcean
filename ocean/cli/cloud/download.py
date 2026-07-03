@@ -186,29 +186,59 @@ def _list_all_files(repo_id: str, revision: str, token: str | None):
 
 
 def _download_file(url: str, dest: str, token: str | None, desc: str = "", file_size: int = 0):
-    """Download a single file with rainbow progress bar."""
+    """Download a single file with resume support via temp file.
+
+    Downloads to ``{dest}.ocean_download_part`` first, then renames on
+    completion.  If a partial file exists, attempts Range-based resume.
+    """
+    dest_path = Path(dest)
+    part_path = dest_path.with_name(dest_path.name + ".ocean_download_part")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
     headers = {"SDK-Version": "ocean-0.1"}
     if token:
         headers["Authorization"] = f"token {token}"
+
+    # Check for partial download to resume
+    existing_size = part_path.stat().st_size if part_path.exists() else 0
+    if existing_size > 0:
+        headers["Range"] = f"bytes={existing_size}-"
+
     resp = requests.get(url, headers=headers, stream=True, timeout=3600)
     resp.raise_for_status()
 
-    total = int(resp.headers.get("content-length", 0)) or file_size
-    dest_path = Path(dest)
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if existing_size > 0 and resp.status_code == 206:
+        # Server supports resume — append mode
+        total = existing_size + int(resp.headers.get("content-length", 0))
+        mode = "ab"
+        desc_suffix = f" (续传 {existing_size / 1024**3:.1f}GB)"
+    else:
+        # No resume — start fresh
+        total = int(resp.headers.get("content-length", 0)) or file_size
+        mode = "wb"
+        desc_suffix = ""
 
-    with open(dest_path, "wb") as f:
+    with open(part_path, mode) as f:
         with ColoredTqdm(
             total=total,
             unit="B",
             unit_scale=True,
-            desc=desc or dest_path.name,
+            desc=(desc or dest_path.name) + desc_suffix,
             leave=False,
         ) as pbar:
+            if mode == "ab":
+                pbar.update(existing_size)
             for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                f.write(chunk)
-                pbar.update(len(chunk))
-    return dest
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+
+    # Rename part → final on success
+    if part_path.exists():
+        # Remove final if it exists (stale/corrupt)
+        dest_path.unlink(missing_ok=True)
+        part_path.rename(dest_path)
+    return str(dest_path)
 
 
 def _lfs_download_real(repo_id: str, oid: str, file_size: int, token: str | None, dest: str, desc: str = "") -> bool:
@@ -251,13 +281,37 @@ def _lfs_download_real(repo_id: str, oid: str, file_size: int, token: str | None
 
     resp = requests.get(download_href, stream=True, timeout=7200)
     resp.raise_for_status()
-    Path(dest).parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "wb") as f:
+
+    dest_path = Path(dest)
+    part_path = dest_path.with_name(dest_path.name + ".ocean_download_part")
+    part_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check for partial download to resume
+    existing_size = part_path.stat().st_size if part_path.exists() else 0
+    if existing_size > 0:
+        resp.close()
+        resume_headers = {"Range": f"bytes={existing_size}-"}
+        resp = requests.get(download_href, headers=resume_headers, stream=True, timeout=7200)
+        resp.raise_for_status()
+        mode = "ab" if resp.status_code == 206 else "wb"
+        if mode == "wb":
+            existing_size = 0
+    else:
+        mode = "wb"
+
+    with open(part_path, mode) as f:
         with ColoredTqdm(total=file_size, unit="B", unit_scale=True, desc=desc, leave=False) as pbar:
+            if mode == "ab":
+                pbar.update(existing_size)
             for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
                 if chunk:
                     f.write(chunk)
                     pbar.update(len(chunk))
+
+    # Rename part → final on success
+    if part_path.exists():
+        dest_path.unlink(missing_ok=True)
+        part_path.rename(dest_path)
     return True
 
 
@@ -291,7 +345,8 @@ def _download_file_with_lfs(
             if expected_sha and dest_dir:
                 _mark_cached(dest_dir, file_path, expected_sha)
             return
-        local_path_obj.unlink(missing_ok=True)
+        # Partial / corrupt file will be picked up by _download_file's
+        # .ocean_download_part resume logic — don't unlink here.
 
     git_host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
     user_name, repo_name = repo_id.split("/")
@@ -316,6 +371,23 @@ def _download_file_with_lfs(
                 oid = oid_match.group(1)
                 file_size = int(size_match.group(1))
                 _lfs_download_real(repo_id, oid, file_size, token, str(local_path_obj), desc=file_path)
+
+                # Verify LFS content SHA against OID
+                import hashlib
+
+                actual = hashlib.sha256(local_path_obj.read_bytes()).hexdigest()
+                if actual != oid:
+                    local_path_obj.unlink(missing_ok=True)
+                    raise ValueError(f"SHA256 mismatch for {file_path} (LFS content): expected {oid}, got {actual}")
+    else:
+        # Verify regular file SHA against git blob SHA
+        if expected_sha:
+            import hashlib
+
+            actual = hashlib.sha256(local_path_obj.read_bytes()).hexdigest()
+            if actual != expected_sha:
+                local_path_obj.unlink(missing_ok=True)
+                raise ValueError(f"SHA256 mismatch for {file_path}: expected {expected_sha}, got {actual}")
 
     # Mark as cached in manifest
     if expected_sha and dest_dir:
