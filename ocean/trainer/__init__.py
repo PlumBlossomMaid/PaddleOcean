@@ -773,6 +773,8 @@ class Trainer:
         val_interval = self.val_check_interval
         if not isinstance(val_interval, int) or val_interval <= 0:
             return False
+        if step == 0:
+            return False
         return step % val_interval == 0
 
     def _should_stop(self) -> bool:
