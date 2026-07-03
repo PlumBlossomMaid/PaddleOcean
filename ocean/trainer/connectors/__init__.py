@@ -226,9 +226,18 @@ class _CheckpointConnector:
         if "optimizer_step" in ckpt:
             self.trainer._optimizer_step = ckpt["optimizer_step"]
 
-        # Restore loop state (batch_progress, etc.)
         if "loops" in ckpt:
             self.trainer.fit_loop.load_state_dict(ckpt["loops"])
+
+        if "lr_schedulers" in ckpt and not weights_only:
+            for config, state in zip(self.trainer._lr_schedulers, ckpt["lr_schedulers"]):
+                config["scheduler"].set_state_dict(state)
+
+        if "callbacks" in ckpt and not weights_only:
+            for cb in self.trainer.callbacks:
+                name = type(cb).__qualname__
+                if name in ckpt["callbacks"] and hasattr(cb, "load_state_dict"):
+                    cb.load_state_dict(ckpt["callbacks"][name])
 
     def dump_checkpoint(self, weights_only: bool = False) -> dict:
         """Build a complete checkpoint dictionary."""
@@ -241,10 +250,23 @@ class _CheckpointConnector:
         }
         if not weights_only and self.trainer._optimizer is not None:
             checkpoint["optimizer_states"] = [self.trainer._optimizer.state_dict()]
-        # Save loop state (batch_progress in fit_loop)
+
         loop_state = self.trainer.fit_loop.state_dict()
         if loop_state:
             checkpoint["loops"] = loop_state
+
+        if self.trainer._lr_schedulers:
+            checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in self.trainer._lr_schedulers]
+
+        callback_states = {}
+        for cb in self.trainer.callbacks:
+            if hasattr(cb, "state_dict"):
+                state = cb.state_dict()
+                if state:
+                    callback_states[type(cb).__qualname__] = state
+        if callback_states:
+            checkpoint["callbacks"] = callback_states
+
         return checkpoint
 
 
