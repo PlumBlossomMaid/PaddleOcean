@@ -270,8 +270,7 @@ class _CheckpointConnector:
         if loop_state:
             checkpoint["loops"] = loop_state
 
-        if self.trainer._lr_schedulers:
-            checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in self.trainer._lr_schedulers]
+        checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in self.trainer._lr_schedulers]
 
         if hasattr(model, "on_save_checkpoint"):
             checkpoint.update(model.on_save_checkpoint())

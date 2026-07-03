@@ -140,7 +140,7 @@ class ModelCheckpoint(Callback):
                 if loop_state:
                     checkpoint["loops"] = loop_state
 
-            if trainer and trainer._lr_schedulers:
+            if trainer:
                 checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in trainer._lr_schedulers]
 
             if hasattr(model, "on_save_checkpoint"):
