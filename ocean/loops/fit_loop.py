@@ -154,9 +154,6 @@ class _FitLoop(_Loop):
 
             trainer.current_epoch += 1
 
-            if trainer._should_check_val():
-                self._run_validation()
-
             if trainer._should_stop():
                 break
 
