@@ -71,7 +71,7 @@ class _TrainingEpochLoop(_Loop):
         # Training step via optimization sub-loop
         kwargs = {"batch": batch, "batch_idx": batch_idx}
         if model.automatic_optimization:
-            result = self.automatic_optimization.run(trainer._optimizer, batch_idx, kwargs)
+            result = self.automatic_optimization.run(trainer.optimizers[0]._optimizer, batch_idx, kwargs)
         else:
             result = self.manual_optimization.run(kwargs)
 
