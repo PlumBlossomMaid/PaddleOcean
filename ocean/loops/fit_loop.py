@@ -184,11 +184,6 @@ class _FitLoop(_Loop):
                     _call_callback_hooks(trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0)
 
         trainer._compute_epoch_metrics()
-        # Log only validation-specific metrics (train metrics from epoch end
-        # shouldn't be re-logged at the same step — creates duplicates).
-        val_metrics = {k: v for k, v in trainer._log_metrics_on_epoch.items() if k.startswith("val")}
-        if val_metrics:
-            trainer._logger_connector.log_metrics(val_metrics, trainer.dataloader_step)
         _call_module_hook(trainer, "on_validation_epoch_end")
         _call_callback_hooks(trainer, "on_validation_epoch_end")
         _call_module_hook(trainer, "on_validation_end")
