@@ -62,9 +62,9 @@ class Tuner:
                 if isinstance(loss, dict):
                     loss = loss.get("loss", paddle.to_tensor(0.0))
                 loss.backward()
-                if self.trainer._optimizers:
-                    self.trainer._optimizers[0]._optimizer.step()
-                    self.trainer._optimizers[0]._optimizer.clear_grad()
+                if self.trainer.optimizers:
+                    self.trainer.optimizers[0]._optimizer.step()
+                    self.trainer.optimizers[0]._optimizer.clear_grad()
             return True
         except Exception as e:
             s = str(e).lower()
@@ -82,10 +82,10 @@ class Tuner:
         num_steps: int = 100,
     ) -> float:
         """Exponentially increase LR, find steepest descent point."""
-        if not self.trainer._optimizers:
+        if not self.trainer.optimizers:
             raise ValueError("No optimizer configured.")
 
-        opt = self.trainer._optimizers[0]._optimizer
+        opt = self.trainer.optimizers[0]._optimizer
         orig_lr = float(opt.get_lr())
         device = self.trainer._resolve_device()
         model.train()

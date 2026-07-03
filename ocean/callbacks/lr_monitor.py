@@ -26,7 +26,7 @@ class LearningRateMonitor(Callback):
         self._record_lr(trainer, model)
 
     def _record_lr(self, trainer: Any, model: Any) -> None:
-        optimizers = trainer._optimizers
+        optimizers = trainer.optimizers
         for i, opt_wrapper in enumerate(optimizers):
             opt = opt_wrapper._optimizer
             lr = getattr(opt, "_learning_rate", None)
