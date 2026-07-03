@@ -765,17 +765,16 @@ class Trainer:
             return False
         return self.current_epoch % self.check_val_every_n_epoch == 0
 
-    def _should_check_val_step(self, step: int) -> bool:
-        """Check if validation should run at this training step (ocean-compatible).
+    def _should_check_val_step(self, batch_idx: int) -> bool:
+        """Check if validation should run at this training batch.
 
-        Only triggered when val_check_interval is an int (every N steps).
+        Uses batch_idx so each batch is counted independently —
+        gradient accumulation does not cause duplicate triggers.
         """
         val_interval = self.val_check_interval
         if not isinstance(val_interval, int) or val_interval <= 0:
             return False
-        if step == 0:
-            return False
-        return step % val_interval == 0
+        return (batch_idx + 1) % val_interval == 0
 
     def _should_stop(self) -> bool:
         return self.should_stop or (0 < self.max_steps <= self._dataloader_step)
