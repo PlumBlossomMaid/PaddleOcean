@@ -91,6 +91,8 @@ class TQDMProgressBar(ProgressBar):
         tqdm handles formatting natively — ints stay ints, floats are auto-formatted.
         """
         items = dict(trainer.progress_bar_metrics)
+        if "steps" not in items:
+            items["steps"] = trainer.optimizer_step
         for k, v in list(items.items()):
             if isinstance(v, float) and np.isnan(v):
                 items[k] = "nan"
