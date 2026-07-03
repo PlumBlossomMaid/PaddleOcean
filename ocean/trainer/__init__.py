@@ -199,6 +199,7 @@ class Trainer:
         self._optimizer_step: int = 0
         self._optimizers: list = []
         self._optimizer: Any = None  # kept for backward compat
+        self._lr_schedulers: list = []
         self.should_stop: bool = False
 
         # === Model & Data ===
@@ -735,7 +736,8 @@ class Trainer:
 
         if model._optimizer is not None:
             return [OceanOptimizer(model._optimizer)]
-        opts, _ = init_optimizers_and_lr_schedulers(model)
+        opts, lr_schedulers = init_optimizers_and_lr_schedulers(model)
+        self._lr_schedulers = lr_schedulers
         return [OceanOptimizer(opt) for opt in opts]
 
     def _move_to_device(self, batch: Any, device: Any) -> Any:

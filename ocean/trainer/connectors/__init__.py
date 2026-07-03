@@ -206,7 +206,7 @@ class _CheckpointConnector:
         self._loaded_checkpoint: Optional[dict] = None
 
     def restore(self, checkpoint_path: str, weights_only: Optional[bool] = None) -> None:
-        """Load checkpoint and restore model/optimizer state."""
+        """Load checkpoint and restore model/optimizer/loop state."""
         ckpt = paddle.load(checkpoint_path)
         self._loaded_checkpoint = ckpt
         model = self.trainer._model
@@ -214,10 +214,25 @@ class _CheckpointConnector:
         if "state_dict" in ckpt:
             model.set_state_dict(ckpt["state_dict"])
 
-        if "optimizer_states" in ckpt and not weights_only:
+        if not weights_only:
+            if "optimizer_states" not in ckpt:
+                raise KeyError("Trying to restore optimizer state but checkpoint contains only the model.")
             opt = self.trainer._optimizer
             if opt is not None and ckpt["optimizer_states"]:
                 opt.set_state_dict(ckpt["optimizer_states"][0])
+
+            if "lr_schedulers" not in ckpt:
+                raise KeyError(
+                    "Trying to restore learning rate scheduler state but checkpoint contains only the model."
+                )
+            for config, state in zip(self.trainer._lr_schedulers, ckpt["lr_schedulers"]):
+                config["scheduler"].set_state_dict(state)
+
+            if "callbacks" in ckpt:
+                for cb in self.trainer.callbacks:
+                    name = type(cb).__qualname__
+                    if name in ckpt["callbacks"] and hasattr(cb, "load_state_dict"):
+                        cb.load_state_dict(ckpt["callbacks"][name])
 
         if "epoch" in ckpt:
             self.trainer.current_epoch = ckpt["epoch"]
@@ -225,6 +240,9 @@ class _CheckpointConnector:
             self.trainer._dataloader_step = ckpt["dataloader_step"]
         if "optimizer_step" in ckpt:
             self.trainer._optimizer_step = ckpt["optimizer_step"]
+
+        if "loops" in ckpt:
+            self.trainer.fit_loop.load_state_dict(ckpt["loops"])
 
     def dump_checkpoint(self, weights_only: bool = False) -> dict:
         """Build a complete checkpoint dictionary."""
@@ -237,6 +255,23 @@ class _CheckpointConnector:
         }
         if not weights_only and self.trainer._optimizer is not None:
             checkpoint["optimizer_states"] = [self.trainer._optimizer.state_dict()]
+
+        loop_state = self.trainer.fit_loop.state_dict()
+        if loop_state:
+            checkpoint["loops"] = loop_state
+
+        if self.trainer._lr_schedulers:
+            checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in self.trainer._lr_schedulers]
+
+        callback_states = {}
+        for cb in self.trainer.callbacks:
+            if hasattr(cb, "state_dict"):
+                state = cb.state_dict()
+                if state:
+                    callback_states[type(cb).__qualname__] = state
+        if callback_states:
+            checkpoint["callbacks"] = callback_states
+
         return checkpoint
 
 

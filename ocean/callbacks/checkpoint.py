@@ -121,14 +121,29 @@ class ModelCheckpoint(Callback):
                 state = {k: v for k, v in state.items()}
             paddle.save(state, path)
         else:
+            trainer = model._trainer
             checkpoint = {
                 "state_dict": model.state_dict(),
-                "epoch": model._trainer.current_epoch if model._trainer else 0,
-                "dataloader_step": model._trainer.dataloader_step if model._trainer else 0,
-                "optimizer_step": model._trainer.optimizer_step if model._trainer else 0,
+                "epoch": trainer.current_epoch if trainer else 0,
+                "dataloader_step": trainer.dataloader_step if trainer else 0,
+                "optimizer_step": trainer.optimizer_step if trainer else 0,
             }
             if hasattr(model, "_optimizer") and model._optimizer is not None:
-                checkpoint["optimizer"] = model._optimizer.state_dict()
+                checkpoint["optimizer_states"] = [model._optimizer.state_dict()]
+            if trainer and hasattr(trainer, "fit_loop"):
+                loop_state = trainer.fit_loop.state_dict()
+                if loop_state:
+                    checkpoint["loops"] = loop_state
+            if trainer and trainer._lr_schedulers:
+                checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in trainer._lr_schedulers]
+            callback_states = {}
+            for cb in trainer.callbacks if trainer else []:
+                if hasattr(cb, "state_dict"):
+                    state = cb.state_dict()
+                    if state:
+                        callback_states[type(cb).__qualname__] = state
+            if callback_states:
+                checkpoint["callbacks"] = callback_states
             paddle.save(checkpoint, path)
 
     def state_dict(self) -> dict:

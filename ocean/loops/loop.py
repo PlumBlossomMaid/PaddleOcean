@@ -20,9 +20,7 @@ class _Loop(ABC):
     @restarting.setter
     def restarting(self, value: bool) -> None:
         self._restarting = value
-        # Propagate to sub-loops
-        for attr_name in dir(self):
-            attr = getattr(self, attr_name)
+        for attr in self.__dict__.values():
             if isinstance(attr, _Loop):
                 attr.restarting = value
 
@@ -41,21 +39,22 @@ class _Loop(ABC):
 
     def state_dict(self) -> dict[str, Any]:
         d = {}
-        for attr_name in dir(self):
-            attr = getattr(self, attr_name)
+        for name, attr in self.__dict__.items():
             if isinstance(attr, _Loop):
-                d[attr_name] = attr.state_dict()
+                d[name] = attr.state_dict()
             elif hasattr(attr, "state_dict"):
-                d[attr_name] = attr.state_dict()
+                d[name] = attr.state_dict()
         return d
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        for attr_name, state in state_dict.items():
-            attr = getattr(self, attr_name, None)
+        for name in state_dict:
+            attr = getattr(self, name, None)
+            if attr is None:
+                continue
             if isinstance(attr, _Loop):
-                attr.load_state_dict(state)
+                attr.load_state_dict(state_dict[name])
             elif hasattr(attr, "load_state_dict"):
-                attr.load_state_dict(state)
+                attr.load_state_dict(state_dict[name])
         self._restarting = True
         self._resuming_from_checkpoint = True
 
