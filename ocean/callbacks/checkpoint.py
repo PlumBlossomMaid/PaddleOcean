@@ -129,6 +129,11 @@ class ModelCheckpoint(Callback):
             }
             if hasattr(model, "_optimizer") and model._optimizer is not None:
                 checkpoint["optimizer"] = model._optimizer.state_dict()
+            # Save loop state (batch_progress for resume)
+            if model._trainer and hasattr(model._trainer, "fit_loop"):
+                loop_state = model._trainer.fit_loop.state_dict()
+                if loop_state:
+                    checkpoint["loops"] = loop_state
             paddle.save(checkpoint, path)
 
     def state_dict(self) -> dict:

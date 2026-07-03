@@ -8,6 +8,7 @@ from typing import Any, Optional
 import paddle
 
 from ocean.loops.loop import _Loop
+from ocean.loops.progress import _BatchProgress
 from ocean.trainer.call import _call_callback_hooks, _call_module_hook
 
 
@@ -18,6 +19,7 @@ class _FitLoop(_Loop):
         super().__init__(trainer)
         self.min_epochs = min_epochs
         self.max_epochs = max_epochs or 1000
+        self.batch_progress = _BatchProgress()
 
     @property
     def done(self) -> bool:
@@ -46,25 +48,38 @@ class _FitLoop(_Loop):
             _call_module_hook(trainer, "on_train_epoch_start")
             _call_callback_hooks(trainer, "on_train_epoch_start")
 
+            # DataLoader iterator with skip support for checkpoint resume
+            data_iter = iter(train_loader)
+            if not self.restarting:
+                self.batch_progress.reset()
+
+            # Skip batches already consumed in the current epoch
+            skip = self.batch_progress.current.ready
+            for _ in range(skip):
+                try:
+                    next(data_iter)
+                except StopIteration:
+                    break
+
             # Reset optimizer accumulation
             opt_acc = 0
 
-            for batch_idx, batch in enumerate(train_loader):
+            for batch_idx, batch in enumerate(data_iter, start=skip):
                 if trainer._should_limit_batches(batch_idx, "train"):
                     break
+
+                self.batch_progress.increment_ready()
 
                 batch = trainer._move_to_device(batch, device)
 
                 _call_callback_hooks(trainer, "on_train_batch_start", batch, batch_idx)
-                skip = model.on_train_batch_start(batch, batch_idx)
-                if skip == -1:
+                skip_flag = model.on_train_batch_start(batch, batch_idx)
+                if skip_flag == -1:
                     continue
 
                 # Training step
                 result = model.training_step(batch, batch_idx)
 
-                # Skip automatic backward/optimizer when manual optimization is used
-                # (model handles backward and step inside training_step)
                 if model.automatic_optimization:
                     loss = (
                         result["loss"]
@@ -90,19 +105,15 @@ class _FitLoop(_Loop):
                             model.on_before_optimizer_step(trainer._optimizer)
                             _call_callback_hooks(trainer, "on_before_optimizer_step", trainer._optimizer)
                             trainer._optimizers[0].step()
-                            # optimizer_step auto-incremented by
-                            # OceanOptimizer._on_after_step hook
                             model.on_before_zero_grad(trainer._optimizer)
                             _call_callback_hooks(trainer, "on_before_zero_grad", trainer._optimizer)
                             trainer._optimizers[0].clear_grad()
                             opt_acc = 0
                             trainer._dataloader_step += 1
-                            # Log after optimizer step (Lightning: step = optimizer_step)
                             step = trainer.optimizer_step
                             if step > 0 and step % max(1, trainer.log_every_n_steps) == 0:
                                 trainer._logger_connector.log_metrics(trainer.logged_metrics, step)
                 else:
-                    # Manual optimization: model handles backward/step inside training_step.
                     trainer._dataloader_step += 1
                     trainer._optimizer_step += 1
                     step = trainer.optimizer_step
@@ -111,8 +122,8 @@ class _FitLoop(_Loop):
 
                 model.on_train_batch_end(result, batch, batch_idx)
                 _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
+                self.batch_progress.increment_completed()
 
-                # Step-based validation check (ocean-compatible)
                 if trainer._should_check_val_step(trainer.dataloader_step):
                     self._run_validation()
 
@@ -136,21 +147,21 @@ class _FitLoop(_Loop):
                 trainer._dataloader_step += 1
                 trainer._optimizer_step += 1
 
-            # On epoch end
             trainer._compute_epoch_metrics()
             _call_module_hook(trainer, "on_train_epoch_end")
             _call_callback_hooks(trainer, "on_train_epoch_end")
 
             trainer.current_epoch += 1
 
-            # Validation
             if trainer._should_check_val():
                 self._run_validation()
 
             if trainer._should_stop():
                 break
 
-        # On train end
+            # Restart handling complete — clear flag for subsequent epochs
+            self._restarting = False
+
         _call_module_hook(trainer, "on_train_end")
         _call_callback_hooks(trainer, "on_train_end")
 
@@ -184,11 +195,6 @@ class _FitLoop(_Loop):
                     _call_callback_hooks(trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0)
 
         trainer._compute_epoch_metrics()
-        # Log only validation-specific metrics (train metrics from epoch end
-        # shouldn't be re-logged at the same step — creates duplicates).
-        val_metrics = {k: v for k, v in trainer._log_metrics_on_epoch.items() if k.startswith("val")}
-        if val_metrics:
-            trainer._logger_connector.log_metrics(val_metrics, trainer.dataloader_step)
         _call_module_hook(trainer, "on_validation_epoch_end")
         _call_callback_hooks(trainer, "on_validation_epoch_end")
         _call_module_hook(trainer, "on_validation_end")

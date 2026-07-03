@@ -206,7 +206,7 @@ class _CheckpointConnector:
         self._loaded_checkpoint: Optional[dict] = None
 
     def restore(self, checkpoint_path: str, weights_only: Optional[bool] = None) -> None:
-        """Load checkpoint and restore model/optimizer state."""
+        """Load checkpoint and restore model/optimizer/loop state."""
         ckpt = paddle.load(checkpoint_path)
         self._loaded_checkpoint = ckpt
         model = self.trainer._model
@@ -226,6 +226,10 @@ class _CheckpointConnector:
         if "optimizer_step" in ckpt:
             self.trainer._optimizer_step = ckpt["optimizer_step"]
 
+        # Restore loop state (batch_progress, etc.)
+        if "loops" in ckpt:
+            self.trainer.fit_loop.load_state_dict(ckpt["loops"])
+
     def dump_checkpoint(self, weights_only: bool = False) -> dict:
         """Build a complete checkpoint dictionary."""
         model = self.trainer._model
@@ -237,6 +241,10 @@ class _CheckpointConnector:
         }
         if not weights_only and self.trainer._optimizer is not None:
             checkpoint["optimizer_states"] = [self.trainer._optimizer.state_dict()]
+        # Save loop state (batch_progress in fit_loop)
+        loop_state = self.trainer.fit_loop.state_dict()
+        if loop_state:
+            checkpoint["loops"] = loop_state
         return checkpoint
 
 
