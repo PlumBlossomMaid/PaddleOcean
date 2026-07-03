@@ -214,10 +214,25 @@ class _CheckpointConnector:
         if "state_dict" in ckpt:
             model.set_state_dict(ckpt["state_dict"])
 
-        if "optimizer_states" in ckpt and not weights_only:
+        if not weights_only:
+            if "optimizer_states" not in ckpt:
+                raise KeyError("Trying to restore optimizer state but checkpoint contains only the model.")
             opt = self.trainer._optimizer
             if opt is not None and ckpt["optimizer_states"]:
                 opt.set_state_dict(ckpt["optimizer_states"][0])
+
+            if "lr_schedulers" not in ckpt:
+                raise KeyError(
+                    "Trying to restore learning rate scheduler state but checkpoint contains only the model."
+                )
+            for config, state in zip(self.trainer._lr_schedulers, ckpt["lr_schedulers"]):
+                config["scheduler"].set_state_dict(state)
+
+            if "callbacks" in ckpt:
+                for cb in self.trainer.callbacks:
+                    name = type(cb).__qualname__
+                    if name in ckpt["callbacks"] and hasattr(cb, "load_state_dict"):
+                        cb.load_state_dict(ckpt["callbacks"][name])
 
         if "epoch" in ckpt:
             self.trainer.current_epoch = ckpt["epoch"]
@@ -228,16 +243,6 @@ class _CheckpointConnector:
 
         if "loops" in ckpt:
             self.trainer.fit_loop.load_state_dict(ckpt["loops"])
-
-        if "lr_schedulers" in ckpt and not weights_only:
-            for config, state in zip(self.trainer._lr_schedulers, ckpt["lr_schedulers"]):
-                config["scheduler"].set_state_dict(state)
-
-        if "callbacks" in ckpt and not weights_only:
-            for cb in self.trainer.callbacks:
-                name = type(cb).__qualname__
-                if name in ckpt["callbacks"] and hasattr(cb, "load_state_dict"):
-                    cb.load_state_dict(ckpt["callbacks"][name])
 
     def dump_checkpoint(self, weights_only: bool = False) -> dict:
         """Build a complete checkpoint dictionary."""
