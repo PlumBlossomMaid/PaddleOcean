@@ -197,8 +197,7 @@ class Trainer:
         self.current_epoch: int = 0
         self._dataloader_step: int = 0
         self._optimizer_step: int = 0
-        self._optimizers: list = []
-        self._optimizer: Any = None  # kept for backward compat
+        self.optimizers: list = []
         self._lr_schedulers: list = []
         self.should_stop: bool = False
 
@@ -482,13 +481,11 @@ class Trainer:
             self._original_model = None
 
         # Optimizer & Strategy setup
-        self._optimizers = self._resolve_optimizers(model)
-        if self._optimizers:
-            self.strategy._optimizers = [o._optimizer for o in self._optimizers]
-            # Set up auto-increment for optimizer steps
-            for o in self._optimizers:
+        self.optimizers = self._resolve_optimizers(model)
+        if self.optimizers:
+            self.strategy._optimizers = [o._optimizer for o in self.optimizers]
+            for o in self.optimizers:
                 o._on_after_step = lambda: self._advance_optimizer_step()
-            self._optimizer = self._optimizers[0]._optimizer  # backward compat
 
         # Checkpoint restore
         if ckpt_path is not None:

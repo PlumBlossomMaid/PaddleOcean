@@ -128,8 +128,10 @@ class ModelCheckpoint(Callback):
                 "dataloader_step": trainer.dataloader_step if trainer else 0,
                 "optimizer_step": trainer.optimizer_step if trainer else 0,
             }
-            if hasattr(model, "_optimizer") and model._optimizer is not None:
-                checkpoint["optimizer_states"] = [model._optimizer.state_dict()]
+            if trainer and trainer.optimizers:
+                raw_opt = trainer.optimizers[0]._optimizer
+                if raw_opt is not None:
+                    checkpoint["optimizer_states"] = [raw_opt.state_dict()]
             if trainer and hasattr(trainer, "fit_loop"):
                 loop_state = trainer.fit_loop.state_dict()
                 if loop_state:
