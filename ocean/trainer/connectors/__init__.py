@@ -138,9 +138,10 @@ class _LoggerConnector:
                 self._logged_metrics[name] = mean_val
         self._metrics_buffer.clear()
 
-    def log_metric_value(self, name: str, value: float, prog_bar: bool = False) -> None:
+    def log_metric_value(self, name: str, value: float, prog_bar: bool = False, logger: bool = True) -> None:
         self._callback_metrics[name] = value
-        self._logged_metrics[name] = value
+        if logger:
+            self._logged_metrics[name] = value
         if prog_bar:
             self._progress_bar_metrics[name] = value
         if name not in self._metrics_buffer:
