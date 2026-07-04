@@ -12,6 +12,7 @@ import paddle
 import ocean
 from ocean.callbacks.callback import Callback
 from ocean.callbacks.checkpoint import ModelCheckpoint
+from ocean.callbacks.progress import ProgressBar
 from ocean.loggers.base import Logger
 from ocean.loggers.csv_logs import CSVLogger
 
@@ -175,7 +176,7 @@ class _CallbackConnector:
         callbacks = callbacks or []
         if enable_checkpointing and not any(isinstance(cb, ModelCheckpoint) for cb in callbacks):
             callbacks.append(ModelCheckpoint(dirpath=default_root_dir or "."))
-        if enable_progress_bar and not any(cb.__class__.__name__ == "TQDMProgressBar" for cb in callbacks):
+        if enable_progress_bar and not any(isinstance(cb, ProgressBar) for cb in callbacks):
             from ocean.callbacks.progress import TQDMProgressBar
 
             callbacks.append(TQDMProgressBar())
