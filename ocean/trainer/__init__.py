@@ -335,6 +335,11 @@ class Trainer:
         return self._optimizer_step
 
     @property
+    def num_training_batches(self) -> int:
+        """Total training batches per epoch (from fit_loop)."""
+        return self.fit_loop.max_batches
+
+    @property
     def is_global_zero(self) -> bool:
         """Whether this process is global rank 0.
 

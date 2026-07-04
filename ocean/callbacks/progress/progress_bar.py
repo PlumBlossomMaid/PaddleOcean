@@ -51,15 +51,7 @@ class TQDMProgressBar(ProgressBar):
     def _get_total(trainer: Any, stage: str) -> Optional[int]:
         """Get total number of batches for a stage."""
         if stage == "train":
-            dl = getattr(trainer, "train_dataloader", None)
-            if dl is not None:
-                try:
-                    return len(dl)
-                except TypeError:
-                    pass
-            max_steps = getattr(trainer, "max_steps", None)
-            if max_steps and max_steps > 0:
-                return max_steps
+            return trainer.num_training_batches or None
         elif stage in ("val", "sanity"):
             dls = getattr(trainer, "val_dataloaders", None)
             if dls:
