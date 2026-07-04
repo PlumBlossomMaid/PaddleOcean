@@ -47,7 +47,7 @@ class _FitLoop(_Loop):
             if self.restarting:
                 self.batch_progress.reset_on_restart()
             else:
-                self.batch_progress.reset()
+                self.batch_progress.reset_on_run()
 
             _call_module_hook(trainer, "on_train_epoch_start")
             _call_callback_hooks(trainer, "on_train_epoch_start")

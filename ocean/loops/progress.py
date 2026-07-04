@@ -66,6 +66,9 @@ class _Progress:
     def reset(self) -> None:
         self.current = _ProcessedTracker()
 
+    def reset_on_run(self) -> None:
+        self.reset()
+
     def reset_on_restart(self) -> None:
         self.current.ready = self.total.completed
         self.current.started = self.total.completed
