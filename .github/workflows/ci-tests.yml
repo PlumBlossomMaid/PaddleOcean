@@ -82,7 +82,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install pytest pytest-timeout parameterized scipy librosa
+          pip install pytest pytest-timeout parameterized scipy librosa tqdm
 
       - name: Install paddlemetrics (metrics dependency)
         run: |

@@ -30,6 +30,18 @@ class _FitLoop(_Loop):
             return True
         return False
 
+    @property
+    def max_batches(self) -> int:
+        """Number of training batches per epoch."""
+        trainer = self.trainer
+        dl = getattr(trainer, "train_dataloader", None)
+        if dl is not None:
+            try:
+                return len(dl)
+            except TypeError:
+                pass
+        return 0
+
     def run(self) -> None:
         trainer = self.trainer
         model = trainer._model
