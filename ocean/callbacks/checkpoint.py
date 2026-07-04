@@ -114,6 +114,16 @@ class ModelCheckpoint(Callback):
                         if os.path.exists(path):
                             os.remove(path)
                         self.best_k_models.pop(path, None)
+        elif self.monitor is None and self.save_top_k != 0:
+            ckpt_name = self.filename.format(epoch=epoch, step=step, **monitor_candidates)
+            ckpt_path = os.path.join(self.dirpath, ckpt_name + self.FILE_EXTENSION)
+            self._write_checkpoint(model, ckpt_path)
+            self.best_k_models[ckpt_path] = step
+            if self.save_top_k == 1:
+                for path in list(self.best_k_models.keys()):
+                    if path != ckpt_path and os.path.exists(path):
+                        os.remove(path)
+                        self.best_k_models.pop(path, None)
 
     def _write_checkpoint(self, model: Any, path: str) -> None:
         if self.save_weights_only:

@@ -44,16 +44,16 @@ class _FitLoop(_Loop):
         device = trainer._resolve_device()
 
         while not self.done:
+            # Reset batch progress at epoch START (before hooks, so progress bar reads 0)
+            if not self.restarting:
+                self.batch_progress.reset()
+
             # On epoch start
             _call_module_hook(trainer, "on_train_epoch_start")
             _call_callback_hooks(trainer, "on_train_epoch_start")
 
             # DataLoader iterator with skip support for checkpoint resume
             data_iter = iter(train_loader)
-            if not self.restarting:
-                self.batch_progress.reset()
-
-            # Skip batches already consumed in the current epoch
             skip = self.batch_progress.current.ready
             for _ in range(skip):
                 try:
