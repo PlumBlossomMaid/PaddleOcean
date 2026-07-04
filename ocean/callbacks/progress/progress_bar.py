@@ -103,13 +103,9 @@ class TQDMProgressBar(ProgressBar):
             from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
 
             total = self._get_total(trainer, "train")
-            # Restore tqdm position from batch_progress when resuming
-            initial = 0
-            if hasattr(trainer, "fit_loop") and hasattr(trainer.fit_loop, "batch_progress"):
-                initial = trainer.fit_loop.batch_progress.current.ready
             self._train_tqdm = tqdm(
                 total=total,
-                initial=initial,
+                initial=0,
                 desc=f"Epoch {trainer.current_epoch}",
                 leave=True,
                 unit="it",
@@ -119,7 +115,10 @@ class TQDMProgressBar(ProgressBar):
 
     def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self._train_tqdm is not None:
-            self._train_tqdm.update(1)
+            n = batch_idx + 1
+            if not self._train_tqdm.disable:
+                self._train_tqdm.n = n
+                self._train_tqdm.refresh()
             metrics = self.get_metrics(trainer, model)
             if metrics:
                 self._train_tqdm.set_postfix(**metrics)
