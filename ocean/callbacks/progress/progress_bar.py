@@ -95,6 +95,8 @@ class TQDMProgressBar(ProgressBar):
             from ocean.utils.colored_tqdm import ColoredTqdm as tqdm  # noqa: N813
 
             total = self._get_total(trainer, "train")
+            # Cache per-epoch batch offset for computing local progress
+            self._batch_offset = trainer.fit_loop.batch_progress.current.ready
             self._train_tqdm = tqdm(
                 total=total,
                 initial=0,
@@ -107,7 +109,9 @@ class TQDMProgressBar(ProgressBar):
 
     def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self._train_tqdm is not None:
-            n = batch_idx + 1
+            # Epoch-local batch index: current.ready - per_epoch_offset
+            local = trainer.fit_loop.batch_progress.current.ready - self._batch_offset
+            n = local
             if not self._train_tqdm.disable:
                 self._train_tqdm.n = n
                 self._train_tqdm.refresh()
