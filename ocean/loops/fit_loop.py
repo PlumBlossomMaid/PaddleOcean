@@ -72,20 +72,23 @@ class _FitLoop(_Loop):
             opt_acc = 0
 
             for batch_idx, batch in enumerate(data_iter, start=skip):
-                if trainer._should_limit_batches(batch_idx, "train"):
+                if trainer._should_limit_batches(batch_idx - skip, "train"):
                     break
 
                 self.batch_progress.increment_ready()
 
+                # Epoch-local batch index for callbacks
+                local_batch_idx = self.batch_progress.current.ready - 1
+
                 batch = trainer._move_to_device(batch, device)
 
-                _call_callback_hooks(trainer, "on_train_batch_start", batch, batch_idx)
-                skip_flag = model.on_train_batch_start(batch, batch_idx)
+                _call_callback_hooks(trainer, "on_train_batch_start", batch, local_batch_idx)
+                skip_flag = model.on_train_batch_start(batch, local_batch_idx)
                 if skip_flag == -1:
                     continue
 
                 # Training step
-                result = model.training_step(batch, batch_idx)
+                result = model.training_step(batch, local_batch_idx)
 
                 if model.automatic_optimization:
                     loss = (
@@ -131,8 +134,8 @@ class _FitLoop(_Loop):
                     if step > 0 and step % max(1, trainer.log_every_n_steps) == 0:
                         trainer._logger_connector.log_metrics(trainer.logged_metrics, step)
 
-                model.on_train_batch_end(result, batch, batch_idx)
-                _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
+                model.on_train_batch_end(result, batch, local_batch_idx)
+                _call_callback_hooks(trainer, "on_train_batch_end", result, batch, local_batch_idx)
                 self.batch_progress.increment_completed()
 
                 if trainer._should_check_val_step(batch_idx):
