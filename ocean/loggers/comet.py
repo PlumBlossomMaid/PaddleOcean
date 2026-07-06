@@ -1,7 +1,7 @@
 """CometLogger - logs metrics to CometML.
 
 Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
-only rank 0 writes to CometML (matching Lightning's CometLogger pattern).
+only rank 0 writes to CometML.
 """
 
 from typing import Any, Mapping, Optional

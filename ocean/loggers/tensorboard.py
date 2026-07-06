@@ -5,7 +5,7 @@ This logger bridges the gap by writing TensorBoard-format events
 via the `tensorboardX` or `visualdl` package.
 
 Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
-only rank 0 writes log files (matching Lightning's TensorBoardLogger pattern).
+only rank 0 writes log files.
 """
 
 import os

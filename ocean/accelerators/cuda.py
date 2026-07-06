@@ -11,7 +11,7 @@ class CUDAAccelerator(Accelerator):
     """NVIDIA GPU (CUDA) accelerator."""
 
     def setup_device(self, device: Any = None) -> Any:
-        """Set the current CUDA device (Lightning-compatible).
+        """Set the current CUDA device.
 
         Both sets the device via ``paddle.device.set_device`` and returns
         the corresponding ``CUDAPlace``.

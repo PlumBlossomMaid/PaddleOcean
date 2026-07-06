@@ -1,4 +1,4 @@
-"""RunIf decorator — Lightning-style conditional test skipping for PaddlePaddle.
+"""RunIf decorator — conditional test skipping for PaddlePaddle.
 
 Usage::
 
@@ -45,7 +45,7 @@ def _is_on_windows() -> bool:
 
 
 class RunIf:
-    """Conditional test skip decorator, matching Lightning's ``RunIf``.
+    """Conditional test skip decorator.
 
     Args:
         min_cuda_gpus: Minimum number of CUDA GPUs required.

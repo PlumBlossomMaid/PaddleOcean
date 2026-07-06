@@ -114,7 +114,7 @@ class TestMetricWithModelLog:
                 x, y = batch
                 preds = self(x)
                 loss = ocean.nn.functional.cross_entropy(preds, y.squeeze())
-                # Log a paddlemetrics Metric object (align with Lightning pattern)
+                # Log a paddlemetrics Metric object
                 self.train_acc(preds, y.squeeze())
                 self.log("train_acc", self.train_acc, on_step=True, on_epoch=True)
                 return loss

@@ -1,4 +1,4 @@
-"""Rank zero utilities — Lightning-style functions for distributed training.
+"""Rank zero utilities for distributed training.
 
 Usage::
 
@@ -46,7 +46,7 @@ def _refresh_rank() -> None:
 
 
 # ------------------------------------------------------------------
-# Convenience logging functions (Lightning-style)
+# Convenience logging functions
 # ------------------------------------------------------------------
 
 
@@ -66,7 +66,7 @@ def rank_zero_warn(msg: str) -> None:
 
 
 # ------------------------------------------------------------------
-# _DummyExperiment — no-op for non-rank-0 processes (Lightning compat)
+# _DummyExperiment — no-op for non-rank-0 processes
 # ------------------------------------------------------------------
 
 
@@ -106,7 +106,7 @@ def rank_zero_experiment(fn: Callable) -> Callable:
 
 
 # ------------------------------------------------------------------
-# WarningCache (Lightning-style)
+# WarningCache
 # ------------------------------------------------------------------
 
 

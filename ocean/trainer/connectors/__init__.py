@@ -331,7 +331,7 @@ class _SignalConnector:
 class _AcceleratorConnector:
     """Resolves accelerator, strategy, devices, and precision.
 
-    Matches Lightning's pattern::
+    Strategy resolution logic::
         - Resolve accelerator first (auto-detect available hardware).
         - Parse devices via ``accelerator.parse_devices(devices)``.
         - Build parallel device list via ``accelerator.get_parallel_devices()``.
@@ -360,9 +360,9 @@ class _AcceleratorConnector:
         # Parse devices and build parallel device list
         self._devices_flag = self._accelerator.parse_devices(devices)
         self._parallel_devices = self._accelerator.get_parallel_devices(devices)
-        # Choose strategy based on device count (Lightning pattern)
+        # Choose strategy based on device count
         self._strategy = self._resolve_strategy(strategy, self._parallel_devices)
-        # Inject accelerator & devices into strategy (Lightning's _lazy_init_strategy)
+        # Inject accelerator & devices into strategy
         self._strategy.accelerator = self._accelerator
         self._strategy.parallel_devices = self._parallel_devices
         # Resolve precision
@@ -414,7 +414,7 @@ class _AcceleratorConnector:
 
     @staticmethod
     def _resolve_strategy(strategy: str, parallel_devices: list[Any]) -> Any:
-        """Choose strategy based on device count, matching Lightning's pattern.
+        """Choose strategy based on device count.
 
         Resolution order::
             strategy="auto":
@@ -427,7 +427,7 @@ class _AcceleratorConnector:
         from ocean.strategies import SingleDeviceStrategy
 
         if strategy == "auto":
-            # Multi-device → DDP (Lightning pattern)
+            # Multi-device → DDP
             if len(parallel_devices) > 1:
                 from ocean.strategies.ddp import DDPStrategy
 

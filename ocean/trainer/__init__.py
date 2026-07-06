@@ -358,7 +358,7 @@ class Trainer:
     ) -> Any:
         """Launch a training function across multiple processes via ``paddle.distributed.spawn``.
 
-        This is the Ocean equivalent of Lightning's ``ddp_spawn``.  Each
+        This enables DDP-style spawning with the chosen strategy.  Each
         subprocess receives ``fn(rank, *args)`` and should create its own
         model and trainer inside.
 
@@ -398,7 +398,7 @@ class Trainer:
         self.state.fn = TrainerFn.FITTING
         self.state.status = TrainerStatus.RUNNING
 
-        # Auto-spawn for ddp_spawn strategy (Lightning-compatible)
+        # Auto-spawn for ddp_spawn strategy
         if self.strategy_flag == "ddp_spawn" and len(getattr(self.strategy, "parallel_devices", [])) > 1:
             from ocean.trainer.connectors import _AcceleratorConnector
 
@@ -637,7 +637,7 @@ class Trainer:
 
         If ``value`` is a ``paddlemetrics.Metric``, it is stored for
         epoch-level ``.compute()``.  Scalars / Tensors follow the
-        existing mean-reduce path (aligns with Lightning's pattern).
+        existing mean-reduce path.
         """
         # ── paddlemetrics Metric path ────────────────────────────────
         if _HAS_PADDLEMETRICS and isinstance(value, PaddleMetric):
@@ -683,13 +683,14 @@ class Trainer:
 
         Scalars: averaged across steps.
         ``paddlemetrics.Metric`` objects: delegated to ``.compute()``
-        (aligns with Lightning's pattern — the Metric handles its own
-        reduction across batches and distributed sync).
         """
         # ── Scalar / Tensor metrics (mean-reduce) ────────────────────
         for name, values in self._log_metrics_buffer.items():
             if values:
-                self._log_metrics_on_epoch[name] = float(sum(values)) / len(values)
+                mean_val = float(sum(values)) / len(values)
+                self._log_metrics_on_epoch[name] = mean_val
+                # Populate _logged_metrics so callbacks (FileMetricsCallback) can read epoch means
+                self._logger_connector._logged_metrics[name] = mean_val
         self._log_metrics_buffer.clear()
 
         # ── paddlemetrics Metric objects (delegate to .compute()) ────
@@ -699,6 +700,7 @@ class Trainer:
                 if hasattr(val, "item"):
                     val = val.item()
                 self._log_metrics_on_epoch[name] = float(val)
+                self._logger_connector._logged_metrics[name] = float(val)
             except Exception:
                 pass
         self._metric_objects.clear()
@@ -791,17 +793,17 @@ class Trainer:
         return False
 
     def _sanity_check(self, model: Any, device: Any) -> None:
-        """Run sanity check — aligned with Lightning behavior.
+        """Run sanity check.
 
         - Calls ``on_sanity_check_start/end`` (NOT ``on_validation_start/end``).
         - Resets logged metrics before/after so ``val/loss`` does not leak
           into training step-0 log flushes.
-        - Does NOT call ``empty_cache()`` (Lightning doesn't either; any
+        - Does NOT call ``empty_cache()``; any
           memory issue is a real leak that must be fixed at the root).
         """
         from ocean.trainer.call import _call_callback_hooks
 
-        # Reset metrics before sanity check (Lightning-style)
+        # Reset metrics before sanity check
         self._logger_connector.reset_validation_metrics()
 
         self.sanity_checking = True
@@ -809,7 +811,7 @@ class Trainer:
         try:
             _call_callback_hooks(self, "on_sanity_check_start")
             # Call on_validation_start/epoch_end hooks, matching
-            # Lightning's val_loop.run which calls _on_evaluation_start
+            # val_loop.run which calls _on_evaluation_start
             # before batches and _on_evaluation_epoch_end after.
             _call_module_hook(self, "on_validation_start")
             _call_callback_hooks(self, "on_validation_start")
@@ -830,7 +832,7 @@ class Trainer:
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
             model.train()
-            # Reset metrics after sanity check (Lightning-style)
+            # Reset metrics after sanity check
             self._logger_connector.reset_validation_metrics()
 
     def _teardown(self) -> None:

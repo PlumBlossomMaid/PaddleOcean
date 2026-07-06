@@ -77,7 +77,7 @@ class TQDMProgressBar(ProgressBar):
 
     @staticmethod
     def get_metrics(trainer: Any, model: Any) -> dict[str, Any]:
-        """Get metrics for progress bar display. Raw values (Lightning-compatible).
+        """Get metrics for progress bar display. Raw values.
 
         Only shows metrics logged with prog_bar=True.
         tqdm handles formatting natively — ints stay ints, floats are auto-formatted.

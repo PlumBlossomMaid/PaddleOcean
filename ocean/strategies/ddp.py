@@ -55,7 +55,7 @@ class DDPStrategy(ParallelStrategy):
     def _detect_existing_distributed(self) -> None:
         """Detect if distributed env is already initialized and set rank from env vars.
 
-        Lightning sets ``rank_zero_only.rank`` in ``set_world_ranks()`` **before**
+        ``rank_zero_only.rank`` is set in ``set_world_ranks()`` **before**
         calling ``init_process_group``, reading ``RANK`` / ``LOCAL_RANK`` from the
         environment set by the launcher.
 
@@ -63,7 +63,7 @@ class DDPStrategy(ParallelStrategy):
         We read it here so ``rank_zero_only`` works from the start, even before
         ``init_parallel_env()`` is called.
         """
-        # Set rank from launcher env vars (Lightning pattern — before init)
+        # Set rank from launcher env vars (before init)
         trainer_id = os.environ.get("PADDLE_TRAINER_ID")
         if trainer_id is not None:
             self._rank = int(trainer_id)
@@ -138,7 +138,7 @@ class DDPStrategy(ParallelStrategy):
         }
 
     # ------------------------------------------------------------------
-    # Setup — matches Lightning's pattern:
+    # Setup:
     #   1. accelerator.setup_device(root_device)     → set device
     #   2. paddle.distributed.init_parallel_env()    → init distributed
     #   3. rank_zero_only.rank = global_rank         → rank filter
@@ -183,7 +183,7 @@ class DDPStrategy(ParallelStrategy):
         else:
             self._default_device_setup()
 
-        # Step 3: Sync rank to rank_zero_only (Lightning pattern)
+        # Step 3: Sync rank to rank_zero_only
         from ocean.utils.rank_zero import rank_zero_only
 
         rank_zero_only.rank = self._rank
@@ -214,7 +214,7 @@ class DDPStrategy(ParallelStrategy):
     def _determine_ddp_device_ids(self) -> Optional[list[int]]:
         """Return device_ids for DDP, or ``None`` for CPU.
 
-        Matches Lightning's ``determine_ddp_device_ids()``:
+        Determines DDP device IDs:
         - CUDA/XPU: return ``[local_rank]``
         - CPU: return ``None``
         """
@@ -355,7 +355,7 @@ class DDPStrategy(ParallelStrategy):
             return {}
 
     # ==================================================================
-    # Launch utilities — matches Lightning's launcher pattern
+    # Launch utilities
     # ==================================================================
 
     @staticmethod

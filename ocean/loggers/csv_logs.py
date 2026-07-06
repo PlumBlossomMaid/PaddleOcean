@@ -1,7 +1,7 @@
 """CSVLogger - logs metrics to CSV files.
 
 Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
-only rank 0 writes CSV files (matching Lightning's CSVLogger pattern).
+only rank 0 writes CSV files.
 """
 
 import csv

@@ -20,6 +20,8 @@ class _FitLoop(_Loop):
         self.min_epochs = min_epochs
         self.max_epochs = max_epochs or 1000
         self.batch_progress = _BatchProgress()
+        # Cache once at run() start, avoid re-computing len(dl) every epoch
+        self._max_batches: int = 0
 
     @property
     def done(self) -> bool:
@@ -32,15 +34,8 @@ class _FitLoop(_Loop):
 
     @property
     def max_batches(self) -> int:
-        """Number of training batches per epoch."""
-        trainer = self.trainer
-        dl = getattr(trainer, "train_dataloader", None)
-        if dl is not None:
-            try:
-                return len(dl)
-            except TypeError:
-                pass
-        return 0
+        """Number of training batches per epoch (cached once at run() start)."""
+        return self._max_batches
 
     def run(self) -> None:
         trainer = self.trainer
@@ -48,6 +43,12 @@ class _FitLoop(_Loop):
         train_loader = getattr(trainer, "train_dataloader", None)
         if train_loader is None:
             return
+
+        # Cache max_batches once at run() start
+        try:
+            self._max_batches = len(train_loader)
+        except TypeError:
+            self._max_batches = 0
 
         # On train start
         _call_module_hook(trainer, "on_train_start")
@@ -204,6 +205,5 @@ class _FitLoop(_Loop):
         _call_module_hook(trainer, "on_validation_end")
         _call_callback_hooks(trainer, "on_validation_end")
         # Clear val/test metrics so they don't leak into training log flushes
-        # (Lightning separates val/train metric collections; ocean shares _logged_metrics)
         trainer._logger_connector.reset_validation_metrics()
         model.on_validation_model_train()
