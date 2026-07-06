@@ -77,8 +77,10 @@ class _FitLoop(_Loop):
 
                 self.batch_progress.increment_ready()
 
-                # Epoch-local batch index for callbacks
+                # Epoch-local batch index; stop when max_batches reached
                 local_batch_idx = self.batch_progress.current.ready - 1
+                if local_batch_idx >= self._max_batches:
+                    break
 
                 batch = trainer._move_to_device(batch, device)
 
