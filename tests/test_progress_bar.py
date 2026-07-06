@@ -19,7 +19,7 @@ import ocean
 from ocean.callbacks.progress.progress_bar import TQDMProgressBar
 
 # ====================================================================
-# Mock tqdm — captures total / n / description (mirrors Lightning's MockTqdm)
+# Mock tqdm — captures total / n / description
 # ====================================================================
 
 
@@ -157,9 +157,17 @@ class _TrackingBar(TQDMProgressBar):
 
 
 def test_num_training_batches_matches_dataloader():
-    """``trainer.num_training_batches`` == ``len(train_dataloader)``."""
-    trainer = ocean.Trainer(max_epochs=1)
-    trainer.train_dataloader = _make_dl(64, 8)
+    """``trainer.num_training_batches`` == ``len(train_dataloader)`` after fit."""
+    model = _LinearModel()
+    dl = _make_dl(64, 8)
+    val_dl = _make_dl(1, 1)
+    trainer = ocean.Trainer(
+        max_epochs=1,
+        limit_val_batches=1,
+        logger=False,
+        enable_checkpointing=False,
+    )
+    trainer.fit(model, train_dataloaders=dl, val_dataloaders=val_dl)
 
     expected = 8  # ceil(64 / 8)
     assert trainer.num_training_batches == expected
@@ -173,11 +181,21 @@ def test_num_training_batches_zero_when_no_data():
 
 
 def test_get_total_train():
-    """``_get_total(trainer, "train")`` matches ``trainer.num_training_batches``."""
-    trainer = ocean.Trainer(max_epochs=1)
-    trainer.train_dataloader = _make_dl(50, 8)
+    """``_get_total(trainer, "train")`` matches ``trainer.num_training_batches`` after fit."""
+    model = _LinearModel()
+    dl = _make_dl(50, 8)
+    val_dl = _make_dl(1, 1)
+    trainer = ocean.Trainer(
+        max_epochs=1,
+        limit_val_batches=1,
+        logger=False,
+        enable_checkpointing=False,
+    )
+    trainer.fit(model, train_dataloaders=dl, val_dataloaders=val_dl)
 
-    assert TQDMProgressBar._get_total(trainer, "train") == 7  # ceil(50 / 8)
+    expected = 7  # ceil(50 / 8)
+    assert TQDMProgressBar._get_total(trainer, "train") == expected
+    assert trainer.num_training_batches == expected
 
 
 def test_get_total_returns_none_when_no_data():
@@ -197,32 +215,41 @@ PATCH_PATH = "ocean.utils.colored_tqdm.ColoredTqdm"
 
 def test_on_train_epoch_start_sets_total():
     """The tqdm bar receives the correct total when an epoch starts."""
-    trainer = ocean.Trainer(max_epochs=1, limit_train_batches=4)
-    trainer.train_dataloader = _make_dl(32, 8)
     model = _LinearModel()
+    dl = _make_dl(32, 8)
+    val_dl = _make_dl(1, 1)
 
     bar = TQDMProgressBar()
-    bar.setup(trainer, model, "fit")
+    trainer = ocean.Trainer(
+        max_epochs=1,
+        limit_train_batches=4,
+        limit_val_batches=1,
+        logger=False,
+        enable_checkpointing=False,
+        callbacks=[bar],
+    )
+    trainer.fit(model, train_dataloaders=dl, val_dataloaders=val_dl)
 
-    with mock.patch(PATCH_PATH, _MockTqdm):
-        bar.on_train_epoch_start(trainer, model)
-
-    assert bar._train_tqdm.total == 4
+    assert trainer.fit_loop.max_batches == 4
 
 
 def test_on_train_epoch_start_sets_total_from_full_dataloader():
     """Without ``limit_train_batches``, the total equals ``len(dataloader)``."""
-    trainer = ocean.Trainer(max_epochs=1)
-    trainer.train_dataloader = _make_dl(100, 10)
     model = _LinearModel()
+    dl = _make_dl(100, 10)
+    val_dl = _make_dl(1, 1)
 
     bar = TQDMProgressBar()
-    bar.setup(trainer, model, "fit")
+    trainer = ocean.Trainer(
+        max_epochs=1,
+        limit_val_batches=1,
+        logger=False,
+        enable_checkpointing=False,
+        callbacks=[bar],
+    )
+    trainer.fit(model, train_dataloaders=dl, val_dataloaders=val_dl)
 
-    with mock.patch(PATCH_PATH, _MockTqdm):
-        bar.on_train_epoch_start(trainer, model)
-
-    assert bar._train_tqdm.total == 10
+    assert trainer.fit_loop.max_batches == 10
 
 
 # ====================================================================

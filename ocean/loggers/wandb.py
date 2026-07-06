@@ -1,7 +1,7 @@
 """WandbLogger - logs metrics to Weights & Biases.
 
 Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
-only rank 0 writes to W&B (matching Lightning's WandbLogger pattern).
+only rank 0 writes to W&B.
 """
 
 from typing import Any, Mapping, Optional

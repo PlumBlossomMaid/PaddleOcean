@@ -2,8 +2,8 @@
 
 Re-exports core metric types from ``paddlemetrics``.  Domain-specific
 metrics (``Accuracy``, ``Precision``, ``MeanSquaredError``, …) should
-be imported directly from ``paddlemetrics``, following the same pattern
-Lightning uses with ``torchmetrics``::
+be imported directly from ``paddlemetrics``, following the standard pattern
+for external metric libraries::
 
     from paddlemetrics import Accuracy
 

@@ -54,7 +54,7 @@ class CustomDeviceAccelerator(Accelerator):
         """Set the current custom device and return its CustomPlace.
 
         Both sets the device via ``paddle.device.set_device`` and returns
-        the corresponding ``paddle.CustomPlace`` (Lightning-compatible).
+        the corresponding ``paddle.CustomPlace``.
         """
         if isinstance(device, paddle.CustomPlace):
             idx = device.get_device_id()

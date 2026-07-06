@@ -1,6 +1,6 @@
 """Smoke tests for paddleOcean Phase 1 core abstractions.
 
-Tests both Keras mode (ocean.Model with __model__) and Lightning mode
+Tests both Keras mode and standard mode
 (user subclass of ocean.Model with hooks).
 """
 
@@ -15,12 +15,12 @@ import paddle
 import ocean
 
 # ====================================================================
-# Lightning-mode model
+# Standard-mode model
 # ====================================================================
 
 
 class LinearModel(ocean.Model):
-    """A simple linear model in Lightning mode."""
+    """A simple linear model."""
 
     def __init__(self):
         super().__init__()  # __model__ = None
@@ -104,8 +104,8 @@ class RandomDataModule(ocean.DataModule):
 # ====================================================================
 
 
-def test_model_lightning_mode():
-    """Test Lightning mode: subclass ocean.Model with hooks."""
+def test_model_standard_mode():
+    """Test standard mode: subclass ocean.Model with hooks."""
     model = LinearModel()
     trainer = ocean.Trainer(max_epochs=2, log_every_n_steps=5, verbose=1)
     dm = RandomDataModule(num_samples=50, batch_size=8)
@@ -116,8 +116,8 @@ def test_model_lightning_mode():
     assert trainer.current_epoch == 2
 
 
-def test_model_lightning_mode_direct_dataloaders():
-    """Test Lightning mode with direct dataloader arguments."""
+def test_model_standard_mode_direct_dataloaders():
+    """Test standard mode with direct dataloader arguments."""
     model = LinearModel()
 
     train_dataset = paddle.io.TensorDataset([paddle.randn([50, 10]), paddle.randint(0, 2, [50])])
@@ -232,11 +232,11 @@ if __name__ == "__main__":
     test_model_logging()
     print("✓ test_model_logging")
 
-    test_model_lightning_mode()
-    print("✓ test_model_lightning_mode")
+    test_model_standard_mode()
+    print("✓ test_model_standard_mode")
 
-    test_model_lightning_mode_direct_dataloaders()
-    print("✓ test_model_lightning_mode_direct_dataloaders")
+    test_model_standard_mode_direct_dataloaders()
+    print("✓ test_model_standard_mode_direct_dataloaders")
 
     test_model_keras_mode()
     print("✓ test_model_keras_mode")

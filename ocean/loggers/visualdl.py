@@ -1,8 +1,8 @@
 """VisualDLLogger — logs metrics to VisualDL (Paddle's native visualization tool).
 
-Lightning-compatible: auto-versioning, save_dir/name/version_N/ structure.
+Auto-versioning: save_dir/name/version_N/ structure.
 Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure only
-rank 0 writes log files (matching Lightning's TensorBoardLogger pattern).
+rank 0 writes log files.
 """
 
 import os
@@ -15,7 +15,7 @@ from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
 class VisualDLLogger(Logger):
     """Log metrics to VisualDL for visualization.
 
-    Lightning-compatible with auto-versioning and rank-0-only logging.
+    Auto-versioning with rank-0-only logging.
 
     Args:
         save_dir: Directory to save logs.
@@ -79,7 +79,7 @@ class VisualDLLogger(Logger):
 
     @rank_zero_only
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
-        """Log metrics — only writes on rank 0 (lightning-compatible)."""
+        """Log metrics — only writes on rank 0."""
         if step is None:
             return
         for k, v in metrics.items():

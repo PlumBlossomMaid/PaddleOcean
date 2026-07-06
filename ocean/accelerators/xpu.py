@@ -41,7 +41,7 @@ class XPUAccelerator(Accelerator):
         """Set the current XPU device and return its XPUPlace.
 
         Both sets the device via ``paddle.device.set_device`` and returns
-        the corresponding ``paddle.XPUPlace`` (Lightning-compatible).
+        the corresponding ``paddle.XPUPlace``.
         """
         if isinstance(device, paddle.XPUPlace):
             idx = device.get_device_id()

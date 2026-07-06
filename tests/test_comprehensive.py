@@ -1,7 +1,7 @@
 """Comprehensive tests for paddleOcean Phase 1 & 2.
 
 Tests cover:
-- Model (Lightning mode, Keras mode)
+- Model (standard mode, Keras mode)
 - Trainer (full cycle)
 - DataModule
 - Callbacks (ModelCheckpoint, EarlyStopping, LearningRateMonitor)
@@ -22,7 +22,7 @@ import paddle
 import ocean
 
 # ====================================================================
-# Helper: Lightning-mode model
+# Helper: Standard-mode model
 # ====================================================================
 
 
@@ -108,7 +108,7 @@ def make_val_loader(n=20, bs=8):
 # --- Model basic tests ---
 
 
-def test_model_lightning_mode():
+def test_model_standard_mode():
     model = LinearModel()
     trainer = ocean.Trainer(max_epochs=2, log_every_n_steps=5, verbose=0)
     dm = RandomDataModule(num_samples=30, batch_size=8)
@@ -118,7 +118,7 @@ def test_model_lightning_mode():
     assert trainer.current_epoch == 2
 
 
-def test_model_lightning_direct_dataloaders():
+def test_model_standard_direct_dataloaders():
     model = LinearModel()
     trainer = ocean.Trainer(max_epochs=2, verbose=0)
     trainer.fit(model, train_dataloaders=make_train_loader(), val_dataloaders=make_val_loader())
@@ -159,7 +159,7 @@ def test_model_fit_convenience():
     assert model._trainer is model.__trainer__
 
 
-def test_model_forward_lightning():
+def test_model_forward_standard():
     model = LinearModel()
     x = paddle.randn([4, 10])
     out = model(x)
@@ -490,13 +490,13 @@ if __name__ == "__main__":
 
     tests = [
         ("test_imports", test_imports),
-        ("test_model_lightning_mode", test_model_lightning_mode),
-        ("test_model_lightning_direct_dataloaders", test_model_lightning_direct_dataloaders),
+        ("test_model_standard_mode", test_model_standard_mode),
+        ("test_model_standard_direct_dataloaders", test_model_standard_direct_dataloaders),
         ("test_model_keras_mode", test_model_keras_mode),
         ("test_model_properties", test_model_properties),
         ("test_model_logging", test_model_logging),
         ("test_model_fit_convenience", test_model_fit_convenience),
-        ("test_model_forward_lightning", test_model_forward_lightning),
+        ("test_model_forward_standard", test_model_forward_standard),
         ("test_model_forward_keras", test_model_forward_keras),
         ("test_trainer_validate", test_trainer_validate),
         ("test_trainer_test", test_trainer_test),

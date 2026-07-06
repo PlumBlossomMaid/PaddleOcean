@@ -10,7 +10,7 @@ from ocean.accelerators.accelerator import Accelerator
 class CPUAccelerator(Accelerator):
     """CPU accelerator.
 
-    Matches Lightning's pattern: ``get_parallel_devices(N)`` returns
+    ``get_parallel_devices(N)`` returns
     ``[CPUPlace(), CPUPlace(), ...]`` with ``N`` entries so the
     connector can create ``DDPStrategy`` for multi-CPU distributed runs.
     """

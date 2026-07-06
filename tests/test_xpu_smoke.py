@@ -36,7 +36,7 @@ def test_xpu_tensor_ops():
 
 
 def test_xpu_trainer():
-    """End-to-end training on XPU with Ocean Trainer (Lightning mode)."""
+    """End-to-end training on XPU with Ocean Trainer."""
     ocean.seed_everything(42)
 
     class XPUModel(ocean.Model):

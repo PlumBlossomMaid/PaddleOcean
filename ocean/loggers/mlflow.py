@@ -1,7 +1,7 @@
 """MLFlowLogger - logs metrics to MLflow.
 
 Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
-only rank 0 writes to MLflow (matching Lightning's MLFlowLogger pattern).
+only rank 0 writes to MLflow.
 """
 
 import os
