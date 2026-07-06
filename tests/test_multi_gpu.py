@@ -78,7 +78,7 @@ class TestAcceleratorParseDevices:
         devs = CUDAAccelerator.parse_devices(None)
         assert isinstance(devs, list)
 
-    @RunIf(min_cuda_gpus=1)
+    @RunIf(min_cuda_gpus=2)
     def test_cuda_get_parallel_devices(self):
         """CUDAAccelerator.get_parallel_devices(2) → [CUDAPlace(0), CUDAPlace(1)]."""
         devs = CUDAAccelerator.get_parallel_devices(2)
@@ -152,7 +152,7 @@ class TestDDPStrategyDeviceAgnostic:
         device = strategy.root_device
         assert isinstance(device, (ocean.CUDAPlace, ocean.CPUPlace))
 
-    @RunIf(min_cuda_gpus=1)
+    @RunIf(min_cuda_gpus=2)
     def test_ddp_parallel_devices_injection(self):
         """DDPStrategy accepts parallel_devices from connector."""
         devs = [ocean.CUDAPlace(i) for i in range(2)]

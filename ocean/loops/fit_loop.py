@@ -112,6 +112,10 @@ class _FitLoop(_Loop):
                             model.on_before_optimizer_step(trainer.optimizers[0]._optimizer)
                             _call_callback_hooks(trainer, "on_before_optimizer_step", trainer.optimizers[0]._optimizer)
                             trainer.optimizers[0].step()
+                            # Step interval="step" LR schedulers after each optimizer step
+                            for sched_cfg in trainer._lr_schedulers:
+                                if sched_cfg.get("interval", "epoch") == "step":
+                                    model.lr_scheduler_step(sched_cfg["scheduler"])
                             model.on_before_zero_grad(trainer.optimizers[0]._optimizer)
                             _call_callback_hooks(trainer, "on_before_zero_grad", trainer.optimizers[0]._optimizer)
                             trainer.optimizers[0].clear_grad()
@@ -149,6 +153,10 @@ class _FitLoop(_Loop):
                 model.on_before_optimizer_step(raw_opt)
                 _call_callback_hooks(trainer, "on_before_optimizer_step", raw_opt)
                 raw_opt.step()
+                # Step interval="step" LR schedulers for leftover gradient step
+                for sched_cfg in trainer._lr_schedulers:
+                    if sched_cfg.get("interval", "epoch") == "step":
+                        model.lr_scheduler_step(sched_cfg["scheduler"])
                 model.on_before_zero_grad(raw_opt)
                 _call_callback_hooks(trainer, "on_before_zero_grad", raw_opt)
                 raw_opt.clear_grad()
@@ -158,6 +166,11 @@ class _FitLoop(_Loop):
             trainer._compute_epoch_metrics()
             _call_module_hook(trainer, "on_train_epoch_end")
             _call_callback_hooks(trainer, "on_train_epoch_end")
+
+            # Step interval="epoch" LR schedulers at epoch end
+            for sched_cfg in trainer._lr_schedulers:
+                if sched_cfg.get("interval", "epoch") == "epoch":
+                    model.lr_scheduler_step(sched_cfg["scheduler"])
 
             trainer.current_epoch += 1
 
