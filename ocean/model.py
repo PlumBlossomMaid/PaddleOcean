@@ -282,8 +282,15 @@ class Model(nn.Layer):
         scheduler: Any,
         metric: Any = None,
     ) -> None:
-        """Override to customize LR scheduler step (ocean-compatible)."""
-        scheduler.step()
+        """Override to customize LR scheduler step (ocean-compatible).
+
+        PaddlePaddle's ``ReduceOnPlateau`` takes the monitored metric as a
+        required argument to ``step()``, unlike other schedulers which take none.
+        """
+        if isinstance(scheduler, paddle.optimizer.lr.ReduceOnPlateau):
+            scheduler.step(metric)
+        else:
+            scheduler.step()
 
     def manual_backward(self, loss: paddle.Tensor, *args: Any, **kwargs: Any) -> None:
         """Backward in manual optimization (ocean-compatible)."""
