@@ -1,6 +1,7 @@
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)]()
 [![PaddlePaddle](https://img.shields.io/badge/paddlepaddle-2.4%2B-brightgreen.svg)]()
 [![tests](https://img.shields.io/badge/tests-44%20passed-brightgreen.svg)]()
+[![docs](https://img.shields.io/badge/docs-Sphinx-blue.svg)]()
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)]()
 
 [![EN](https://img.shields.io/badge/lang-EN-red.svg)](README.md)

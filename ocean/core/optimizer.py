@@ -1,5 +1,6 @@
 """OceanOptimizer and optimizer initialization utilities."""
 
+import warnings
 from typing import Any, Optional
 
 import paddle
@@ -92,4 +93,28 @@ def init_optimizers_and_lr_schedulers(model: Any) -> tuple[list, list]:
                 }
             ]
 
+    _warn_unbound_schedulers(optimizers, lr_schedulers)
     return optimizers, lr_schedulers
+
+
+def _warn_unbound_schedulers(optimizers: list, lr_schedulers: list) -> None:
+    """Warn when an LR scheduler is not bound to any optimizer's ``learning_rate``.
+
+    Unlike PyTorch (where the scheduler holds a reference to the optimizer and
+    writes into its param groups), PaddlePaddle stores the schedule *inside* the
+    optimizer: it must be created as ``optimizer(learning_rate=scheduler, ...)``.
+    If that binding is missing, ``scheduler.step()`` silently has no effect on the
+    learning rate, so surface it early.
+    """
+    for cfg in lr_schedulers:
+        scheduler = cfg["scheduler"]
+        bound = any(getattr(opt, "_learning_rate", None) is scheduler for opt in optimizers)
+        if not bound:
+            warnings.warn(
+                "LR scheduler is not bound to any optimizer's learning_rate. In PaddlePaddle "
+                "the scheduler must be passed to the optimizer as "
+                "`paddle.optimizer.X(learning_rate=scheduler, ...)`; otherwise scheduler.step() "
+                "has no effect on the learning rate.",
+                UserWarning,
+                stacklevel=3,
+            )
