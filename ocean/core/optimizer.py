@@ -70,14 +70,25 @@ def init_optimizers_and_lr_schedulers(model: Any) -> tuple[list, list]:
         opt = result.get("optimizer")
         if opt is not None:
             optimizers = [opt]
-        sch = result.get("lr_scheduler")
-        if sch is not None:
+        sch_or_cfg = result.get("lr_scheduler")
+        if sch_or_cfg is not None:
+            if isinstance(sch_or_cfg, dict):
+                cfg = sch_or_cfg
+                scheduler = cfg.get("scheduler", cfg)
+                interval = cfg.get("interval", "epoch")
+                frequency = cfg.get("frequency", 1)
+                monitor = cfg.get("monitor")
+            else:
+                scheduler = sch_or_cfg
+                interval = result.get("interval", "epoch")
+                frequency = result.get("frequency", 1)
+                monitor = result.get("monitor")
             lr_schedulers = [
                 {
-                    "scheduler": sch,
-                    "interval": result.get("interval", "epoch"),
-                    "frequency": result.get("frequency", 1),
-                    "monitor": result.get("monitor"),
+                    "scheduler": scheduler,
+                    "interval": interval,
+                    "frequency": frequency,
+                    "monitor": monitor,
                 }
             ]
 
