@@ -62,8 +62,7 @@ class _DataConnector:
 
         if not isinstance(reload_dataloaders_every_n_epochs, int) or reload_dataloaders_every_n_epochs < 0:
             raise MisconfigurationException(
-                f"`reload_dataloaders_every_n_epochs` should be an int >= 0, "
-                f"got {reload_dataloaders_every_n_epochs!r}."
+                f"`reload_dataloaders_every_n_epochs` should be an int >= 0, got {reload_dataloaders_every_n_epochs!r}."
             )
 
         self.trainer.val_check_interval = val_check_interval

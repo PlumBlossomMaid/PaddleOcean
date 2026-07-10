@@ -119,9 +119,7 @@ class _FitLoop(_Loop):
         datamodule.setup("fit")
         trainer.train_dataloader = datamodule.train_dataloader()
         try:
-            self.epoch_loop._max_batches = trainer._resolve_limit(
-                trainer.train_dataloader, trainer.limit_train_batches
-            )
+            self.epoch_loop._max_batches = trainer._resolve_limit(trainer.train_dataloader, trainer.limit_train_batches)
         except TypeError:
             self.epoch_loop._max_batches = 0
 

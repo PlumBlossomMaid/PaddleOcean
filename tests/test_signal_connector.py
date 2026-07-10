@@ -4,9 +4,22 @@ import os
 import signal
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import ocean
+
+# Windows has no true SIGTERM soft-interrupt semantics: `os.kill(pid, SIGTERM)`
+# terminates the process (exit code 15) instead of dispatching to an in-process
+# handler, so the live-signal test below can't run there. The register/teardown
+# tests above it deliver no real signal and run on all platforms.
+_SKIP_WINDOWS_SIGTERM = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="os.kill(pid, SIGTERM) on Windows terminates the process rather than "
+    "dispatching to an in-process handler; live-signal behavior is "
+    "exercised under POSIX only.",
+)
 
 
 def _trainer():
@@ -52,6 +65,7 @@ def test_teardown_restores_original_handler():
     assert sc._original_handlers == {}
 
 
+@_SKIP_WINDOWS_SIGTERM
 def test_real_sigterm_signal_sets_flag():
     """Deliver an actual SIGTERM and confirm the installed handler runs."""
     original = signal.getsignal(signal.SIGTERM)
