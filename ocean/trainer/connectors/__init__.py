@@ -283,6 +283,14 @@ class _CheckpointConnector:
         if "loops" in ckpt:
             self.trainer.fit_loop.load_state_dict(ckpt["loops"])
 
+        # Stage any persisted loader iteration state here; it is actually applied
+        # on the next run() once the train loader has been rebuilt and only when
+        # the fit loop is restarting (see _FitLoop._load_combined_loader_states).
+        # A checkpoint without this key (plain Paddle loaders) simply stages
+        # nothing and resume proceeds from batch 0.
+        if "combined_loader" in ckpt:
+            self.trainer.fit_loop._combined_loader_states_to_load = ckpt["combined_loader"]
+
         # Restore hparams and any custom state added via on_save_checkpoint(),
         # symmetric with dump_checkpoint().
         if "hparams" in ckpt and hasattr(model, "hparams"):
@@ -308,6 +316,16 @@ class _CheckpointConnector:
         loop_state = self.trainer.fit_loop.state_dict()
         if loop_state:
             checkpoint["loops"] = loop_state
+
+        # Per-loader iteration state for any stateful loaders. A plain Paddle loader
+        # exposes no state_dict, so this is usually empty and adds nothing to the
+        # checkpoint; when a loader opts in to statefulness its state is persisted here
+        # so the loader rebuilt after restore can pick up its mid-epoch position.
+        combined_loader = getattr(self.trainer.fit_loop, "_combined_loader", None)
+        if combined_loader is not None:
+            loader_states = combined_loader._state_dicts()
+            if loader_states:
+                checkpoint["combined_loader"] = loader_states
 
         checkpoint["lr_schedulers"] = [cfg["scheduler"].state_dict() for cfg in self.trainer._lr_schedulers]
 
