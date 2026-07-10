@@ -131,9 +131,10 @@ class _FitLoop(_Loop):
         # before the batch loop moved into the epoch loop. Route it to its new home.
         if "batch_progress" in state_dict and "epoch_loop" not in state_dict:
             self.epoch_loop.batch_progress.load_state_dict(state_dict["batch_progress"])
-            self._restarting = True
+            # Use the property setter so the restart flag cascades to child loops
+            # (matches what super().load_state_dict does after the loop.py fix).
+            self.restarting = True
             self._resuming_from_checkpoint = True
-            self.epoch_loop._restarting = True
             self.epoch_loop._resuming_from_checkpoint = True
             return
         super().load_state_dict(state_dict)

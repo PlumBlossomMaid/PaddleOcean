@@ -55,7 +55,13 @@ class _Loop(ABC):
                 attr.load_state_dict(state_dict[name])
             elif hasattr(attr, "load_state_dict"):
                 attr.load_state_dict(state_dict[name])
-        self._restarting = True
+        # Route through the property setter: it does `self._restarting = True` AND
+        # cascades the flag to every child _Loop (epoch_loop, automatic_optimization, ...).
+        # Lightning relies on every nested loop seeing `restarting=True` so its run()
+        # takes the restart branch (reset_on_restart + skip already-processed batches).
+        # A bare `self._restarting = True` would bypass the cascade and child loops would
+        # silently run as fresh starts, resetting batch_progress and re-processing batches.
+        self.restarting = True
         self._resuming_from_checkpoint = True
 
     def on_iteration_done(self) -> None:
