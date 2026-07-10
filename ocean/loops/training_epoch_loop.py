@@ -17,6 +17,7 @@ from ocean.loops.loop import _Loop
 from ocean.loops.optimization import _AutomaticOptimization, _ManualOptimization
 from ocean.loops.progress import _BatchProgress, _SchedulerProgress
 from ocean.trainer.call import _call_callback_hooks, _call_module_hook
+from ocean.trainer.connectors.logger_connector.result import _ResultCollection
 
 
 class _TrainingEpochLoop(_Loop):
@@ -77,6 +78,11 @@ class _TrainingEpochLoop(_Loop):
             self.batch_progress.update_last_batch(is_last)
 
             batch = trainer._move_to_device(batch, device)
+
+            # Attach the batch so epoch-mean metrics are batch-size weighted.
+            if trainer._results is not None:
+                trainer._results.batch = batch
+                trainer._results.batch_size = None
 
             _call_callback_hooks(trainer, "on_train_batch_start", batch, batch_idx)
             skip_flag = model.on_train_batch_start(batch, batch_idx)
@@ -141,7 +147,9 @@ class _TrainingEpochLoop(_Loop):
                 continue
             scheduler = sched_cfg["scheduler"]
             monitor = sched_cfg.get("monitor")
-            metric = trainer.logged_metrics.get(monitor) if monitor else None
+            # Monitored values are read from callback_metrics (reference behavior),
+            # which — unlike logged_metrics — includes metrics logged with logger=False.
+            metric = trainer.callback_metrics.get(monitor) if monitor else None
             self.scheduler_progress.increment_ready()
             model.lr_scheduler_step(scheduler, metric)
             self.scheduler_progress.increment_completed()
@@ -162,6 +170,14 @@ class _TrainingEpochLoop(_Loop):
         if not val_loader:
             return
 
+        # Validation logs into its OWN collection; the training collection is set
+        # aside untouched and restored afterwards. This is the core F9 fix — a
+        # mid-epoch val can no longer clear the epoch's training accumulation.
+        train_results = trainer._results
+        trainer._results = _ResultCollection(training=False, fork_names=False)
+        # Reflect the running stage so trainer.validating and fx-keying are correct.
+        trainer.validating = True
+
         model.on_validation_model_eval()
         _call_module_hook(trainer, "on_validation_start")
         _call_callback_hooks(trainer, "on_validation_start")
@@ -169,26 +185,41 @@ class _TrainingEpochLoop(_Loop):
         _call_callback_hooks(trainer, "on_validation_epoch_start")
 
         device = trainer._resolve_device()
-        for dataloader in val_loader if isinstance(val_loader, (list, tuple)) else [val_loader]:
-            with paddle.no_grad():
-                for batch_idx, batch in enumerate(dataloader):
-                    if trainer._should_limit_batches(batch_idx, "val"):
-                        break
-                    batch = trainer._move_to_device(batch, device)
-                    _call_callback_hooks(trainer, "on_validation_batch_start", batch, batch_idx, dataloader_idx=0)
-                    model.on_validation_batch_start(batch, batch_idx)
-                    result = model.validation_step(batch, batch_idx)
-                    model.on_validation_batch_end(result, batch, batch_idx)
-                    _call_callback_hooks(trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0)
+        val_limit = getattr(trainer, "limit_val_batches", 1.0)
+        try:
+            for dataloader in val_loader if isinstance(val_loader, (list, tuple)) else [val_loader]:
+                max_val_batches = trainer._resolve_limit(dataloader, val_limit)
+                with paddle.no_grad():
+                    for batch_idx, batch in enumerate(dataloader):
+                        if max_val_batches and batch_idx >= max_val_batches:
+                            break
+                        batch = trainer._move_to_device(batch, device)
+                        trainer._results.batch = batch
+                        trainer._results.batch_size = None
+                        _call_callback_hooks(trainer, "on_validation_batch_start", batch, batch_idx, dataloader_idx=0)
+                        model.on_validation_batch_start(batch, batch_idx)
+                        result = model.validation_step(batch, batch_idx)
+                        model.on_validation_batch_end(result, batch, batch_idx)
+                        _call_callback_hooks(
+                            trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0
+                        )
 
-        trainer._compute_epoch_metrics()
-        _call_module_hook(trainer, "on_validation_epoch_end")
-        _call_callback_hooks(trainer, "on_validation_epoch_end")
-        _call_module_hook(trainer, "on_validation_end")
-        _call_callback_hooks(trainer, "on_validation_end")
-        # Clear val/test metrics so they don't leak into training log flushes.
-        trainer._logger_connector.reset_validation_metrics()
-        model.on_validation_model_train()
+            trainer._compute_epoch_metrics()
+            _call_module_hook(trainer, "on_validation_epoch_end")
+            _call_callback_hooks(trainer, "on_validation_epoch_end")
+            _call_module_hook(trainer, "on_validation_end")
+            _call_callback_hooks(trainer, "on_validation_end")
+        finally:
+            # Discard the eval collection and restore the untouched training one.
+            trainer._logger_connector.reset_validation_metrics()
+            trainer._results = train_results
+            trainer.training = True  # back to the training stage
+            model.on_validation_model_train()
+            # Restart the wall-clock window for time-based validation scheduling.
+            if trainer._val_check_time_interval is not None:
+                import time
+
+                trainer._last_val_time = time.monotonic()
 
     def teardown(self) -> None:
         pass

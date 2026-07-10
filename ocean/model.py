@@ -414,6 +414,14 @@ class Model(nn.Layer):
         """
         return {}
 
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Hook for restoring custom state from a checkpoint.
+
+        Receives the full checkpoint dict; the counterpart of
+        :meth:`on_save_checkpoint`. Override to restore any extra state that
+        was added there. The default is a no-op.
+        """
+
     def save_checkpoint(self, path: str) -> None:
         """Save model checkpoint to path.
 

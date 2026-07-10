@@ -320,7 +320,9 @@ def test_fit_progress_bar_with_limit_train_batches():
         trainer.fit(model, datamodule=dm)
 
     tqdm_bar = bar.last_train_tqdm
-    assert tqdm_bar.total == 8  # full dataloader length; Ocean doesn't cap max_batches with limit_train_batches
+    # limit_train_batches caps the effective batch count, so the bar total is the
+    # limit (3), not the full dataloader length (8).
+    assert tqdm_bar.total == 3
     assert tqdm_bar.n == 3
 
 

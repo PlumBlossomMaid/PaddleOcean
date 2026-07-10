@@ -9,6 +9,7 @@ from ocean.loops.fetchers import _DataFetcher
 from ocean.loops.loop import _Loop
 from ocean.loops.progress import _BatchProgress
 from ocean.trainer.call import _call_callback_hooks, _call_module_hook
+from ocean.trainer.connectors.logger_connector.result import _ResultCollection
 from ocean.trainer.states import RunningStage, TrainerFn
 
 
@@ -63,17 +64,34 @@ class _EvaluationLoop(_Loop):
         if not dataloaders:
             return []
 
+        # Reflect the running stage (VALIDATING / TESTING) on the trainer so
+        # trainer.validating/testing and metric fx-keying are correct.
+        trainer.state.stage = self.stage
+
+        # Evaluation logs into its own (training=False) collection.
+        trainer._results = _ResultCollection(training=False, fork_names=False)
+
         model.eval()
         _call_module_hook(trainer, start_hook)
         _call_callback_hooks(trainer, start_hook)
         _call_module_hook(trainer, epoch_start_hook)
         _call_callback_hooks(trainer, epoch_start_hook)
 
+        # Resolve the batch cap from limit_{val,test}_batches (supports int and
+        # fractional limits); previously this loop ignored the limit entirely.
+        mode = "test" if self.stage == RunningStage.TESTING else "val"
+        limit = getattr(trainer, f"limit_{mode}_batches", 1.0)
+
         with paddle.no_grad():
             for dl_idx, dataloader in enumerate(dataloaders):
+                max_batches = trainer._resolve_limit(dataloader, limit)
                 for batch_idx, batch in enumerate(dataloader):
+                    if max_batches and batch_idx >= max_batches:
+                        break
                     device = trainer._resolve_device()
                     batch = trainer._move_to_device(batch, device)
+                    trainer._results.batch = batch
+                    trainer._results.batch_size = None
                     _call_callback_hooks(trainer, batch_start_hook, batch, batch_idx, dl_idx)
                     _call_module_hook(trainer, batch_start_hook, batch, batch_idx, dl_idx)
                     step_fn = getattr(model, step_method)
