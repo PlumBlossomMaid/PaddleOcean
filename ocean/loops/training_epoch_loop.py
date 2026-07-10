@@ -67,7 +67,21 @@ class _TrainingEpochLoop(_Loop):
         device = trainer._resolve_device()
         max_batches = self._max_batches
 
-        for batch_idx, batch in enumerate(iter(train_loader)):
+        # On restart, skip the batches this epoch had already consumed before the
+        # checkpoint. Lightning tracks this by advancing a data-fetcher's `fetched`
+        # counter by `batch_progress.current.ready` in `on_run_start`; without a
+        # fetcher here, the equivalent is to drain that many batches from the
+        # loader before entering the main loop. `enumerate(..., start=...)` keeps
+        # batch_idx continuous (matching Lightning's `batch_idx = self.batch_idx + 1`)
+        # so hooks, logging, and mid-epoch validation see a true index.
+        skip_batches = self.batch_progress.current.ready
+        loader_iter = iter(train_loader)
+        if skip_batches > 0:
+            for _ in range(skip_batches):
+                if next(loader_iter, None) is None:
+                    break
+
+        for batch_idx, batch in enumerate(loader_iter, start=skip_batches):
             if trainer._should_limit_batches(batch_idx, "train"):
                 break
             if max_batches and batch_idx >= max_batches:
