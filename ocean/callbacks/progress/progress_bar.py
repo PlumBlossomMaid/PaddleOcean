@@ -38,10 +38,17 @@ class ProgressBar(Callback):
 
 
 class TQDMProgressBar(ProgressBar):
-    """Progress bar using ColoredTqdm (rainbow)."""
+    """Progress bar using ColoredTqdm (rainbow).
 
-    def __init__(self) -> None:
+    Args:
+        process_position: Offset for progress bar position. Set to a value
+            greater than 0 to offset by this many lines. Useful when other
+            progress bars are defined elsewhere and you want them stacked.
+    """
+
+    def __init__(self, process_position: int = 0) -> None:
         super().__init__()
+        self.process_position = process_position
         self._train_tqdm = None
         self._val_tqdm = None
         self._test_tqdm = None
@@ -56,9 +63,17 @@ class TQDMProgressBar(ProgressBar):
             dls = getattr(trainer, "val_dataloaders", None)
             if dls:
                 try:
-                    return sum(len(dl) for dl in dls if hasattr(dl, "__len__"))
+                    total = sum(len(dl) for dl in dls if hasattr(dl, "__len__"))
                 except TypeError:
-                    pass
+                    total = None
+                # Apply limit_val_batches
+                limit = getattr(trainer, "limit_val_batches", None)
+                if limit is not None and total is not None:
+                    if isinstance(limit, float) and 0 < limit <= 1.0:
+                        total = int(total * limit)
+                    elif isinstance(limit, int) and limit > 0:
+                        total = min(total, limit)
+                return total
         elif stage == "test":
             dls = getattr(trainer, "test_dataloaders", None)
             if dls:
@@ -101,6 +116,7 @@ class TQDMProgressBar(ProgressBar):
                 desc=f"Epoch {trainer.current_epoch}",
                 leave=True,
                 unit="it",
+                position=self.process_position,
             )
         except ImportError:
             self._train_tqdm = None
@@ -137,6 +153,7 @@ class TQDMProgressBar(ProgressBar):
                 desc="Validation" if trainer.dataloader_step > 0 else "Sanity Check",
                 leave=False,
                 unit="it",
+                position=self.process_position + 1,
             )
         except ImportError:
             self._val_tqdm = None
@@ -151,6 +168,12 @@ class TQDMProgressBar(ProgressBar):
         if self._val_tqdm is not None:
             self._val_tqdm.close()
             self._val_tqdm = None
+        # Refresh training bar postfix with latest metrics
+        if self._train_tqdm is not None and not self._train_tqdm.disable:
+            metrics = self.get_metrics(trainer, model)
+            if metrics:
+                self._train_tqdm.set_postfix(**metrics)
+                self._train_tqdm.refresh()
 
     # ── Test progress ──
 
