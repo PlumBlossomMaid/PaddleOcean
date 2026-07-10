@@ -1,9 +1,9 @@
-"""Tests for validation metric propagation to logged_metrics.
+"""Tests for validation metric propagation after an epoch.
 
-Verifies that ``_compute_epoch_metrics()`` populates ``trainer.logged_metrics``
-with epoch-mean validation metrics, matching the pattern where callbacks
-like ``FileMetricsCallback`` read ``trainer.logged_metrics`` in
-``on_validation_epoch_end``.
+Verifies that ``_compute_epoch_metrics()`` makes epoch-mean validation metrics
+available to callbacks. Metrics logged with ``logger=False`` are surfaced via
+``trainer.callback_metrics`` (the reference behavior) rather than
+``logged_metrics``, which is reserved for values dispatched to loggers.
 """
 
 import os
@@ -100,49 +100,85 @@ def _make_dl(num_samples=32, batch_size=8):
 # ====================================================================
 
 
-def test_logged_metrics_contains_val_after_validation():
-    """``logged_metrics`` contains epoch-mean ``val_loss`` after validation."""
+def test_callback_metrics_contains_val_after_validation():
+    """``callback_metrics`` contains epoch-mean ``val_loss`` after a real validation.
+
+    ``val_check_interval=2`` (int) triggers a genuine mid-epoch validation pass;
+    sanity checking is disabled so the assertion reflects training-time validation,
+    not leaked sanity-check state.
+    """
     model = _ValLogModel()
     trainer = ocean.Trainer(
         max_epochs=1,
+        val_check_interval=2,
         limit_val_batches=4,
         limit_train_batches=2,
+        num_sanity_val_steps=0,
         logger=False,
         enable_checkpointing=False,
     )
     trainer.fit(model, train_dataloaders=_make_dl(16, 8), val_dataloaders=_make_dl(32, 8))
 
-    logged = trainer._logger_connector._logged_metrics
-    assert "val_loss" in logged, f"val_loss not in logged_metrics: {list(logged.keys())}"
-    assert isinstance(logged["val_loss"], float)
-    assert logged["val_loss"] > 0
+    # val_loss is logged with logger=False, so it lives in callback_metrics
+    # (reference behavior), not logged_metrics.
+    metrics = trainer._logger_connector._callback_metrics
+    assert "val_loss" in metrics, f"val_loss not in callback_metrics: {list(metrics.keys())}"
+    assert isinstance(metrics["val_loss"], float)
+    assert metrics["val_loss"] > 0
+    # logger=False must keep it OUT of logged_metrics
+    assert "val_loss" not in trainer._logger_connector._logged_metrics
 
 
-def test_logged_metrics_contains_multiple_val_keys():
-    """All ``on_epoch=True`` val-metrics appear in ``logged_metrics``."""
+def test_training_metrics_survive_midepoch_validation():
+    """F9: a mid-epoch validation must not clobber training accumulation."""
     model = _ValLogModel()
     trainer = ocean.Trainer(
         max_epochs=1,
+        val_check_interval=2,
+        limit_val_batches=4,
+        limit_train_batches=4,
+        num_sanity_val_steps=0,
+        logger=False,
+        enable_checkpointing=False,
+    )
+    trainer.fit(model, train_dataloaders=_make_dl(32, 8), val_dataloaders=_make_dl(32, 8))
+
+    metrics = trainer._logger_connector._callback_metrics
+    # Both the training metric (accumulated across the whole epoch, spanning the
+    # mid-epoch val) and the validation metric are present and independent.
+    assert "train_loss" in metrics
+    assert "val_loss" in metrics
+
+
+def test_callback_metrics_contains_multiple_val_keys():
+    """All ``on_epoch=True`` val-metrics appear in ``callback_metrics``."""
+    model = _ValLogModel()
+    trainer = ocean.Trainer(
+        max_epochs=1,
+        val_check_interval=2,
         limit_val_batches=3,
         limit_train_batches=2,
+        num_sanity_val_steps=0,
         logger=False,
         enable_checkpointing=False,
     )
     trainer.fit(model, train_dataloaders=_make_dl(16, 8), val_dataloaders=_make_dl(24, 8))
 
-    logged = trainer._logger_connector._logged_metrics
-    assert "val_loss" in logged
-    assert "val_acc" in logged
-    assert isinstance(logged["val_acc"], float)
+    metrics = trainer._logger_connector._callback_metrics
+    assert "val_loss" in metrics
+    assert "val_acc" in metrics
+    assert isinstance(metrics["val_acc"], float)
 
 
 def test_val_loss_epoch_mean_matches_manual():
-    """The epoch-mean ``val_loss`` in logged_metrics matches manual calculation."""
+    """The epoch-mean ``val_loss`` in callback_metrics matches manual calculation."""
     model = _ValLogModel()
     trainer = ocean.Trainer(
         max_epochs=1,
+        val_check_interval=2,
         limit_val_batches=3,
         limit_train_batches=2,
+        num_sanity_val_steps=0,
         logger=False,
         enable_checkpointing=False,
     )
@@ -162,9 +198,11 @@ def test_val_loss_epoch_mean_matches_manual():
     trainer.fit(model, train_dataloaders=_make_dl(16, 8), val_dataloaders=_make_dl(24, 8))
 
     expected_mean = sum(val_losses) / len(val_losses)
-    logged = trainer._logger_connector._logged_metrics
-    assert "val_loss" in logged
-    assert abs(logged["val_loss"] - expected_mean) < 1e-5, f"val_loss {logged['val_loss']} != expected {expected_mean}"
+    metrics = trainer._logger_connector._callback_metrics
+    assert "val_loss" in metrics
+    assert abs(metrics["val_loss"] - expected_mean) < 1e-5, (
+        f"val_loss {metrics['val_loss']} != expected {expected_mean}"
+    )
 
 
 def test_max_batches_cached_once():
