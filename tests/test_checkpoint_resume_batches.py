@@ -1,21 +1,18 @@
-"""Resume from checkpoint: restart flag cascades and already-processed batches are skipped.
+"""Resume from checkpoint: restart-flag cascade and honest per-epoch reset.
 
-Two coupled behaviours that were silently broken:
+A resume restores the across-checkpoint state (weights, optimizers, LR schedulers,
+epoch, step counts, and the nested-loop ``restarting`` flag). This module pins two
+parts of that flow used by ``_FitLoop``/``_TrainingEpochLoop``:
 
-1. ``_Loop.load_state_dict`` set ``self._restarting = True`` (bare field), bypassing
-   the ``restarting`` property setter that cascades the flag to child loops. The epoch
-   loop therefore never saw ``restarting=True`` and ran ``reset_on_run`` (zeroing
-   ``batch_progress``) instead of ``reset_on_restart`` (preserving it). Lightning relies
-   on every nested loop seeing ``restarting=True`` for its restart branch.
+1. The ``restarting`` flag set in ``_Loop.load_state_dict`` must propagate to every
+   nested loop through the property setter, so the epoch loop's own restart branch
+   engages (rather than silently running as a fresh start).
 
-2. With the flag fixed, ``_TrainingEpochLoop.run`` still iterated the loader from the
-   start, re-processing batches the checkpoint had already consumed. Lightning advances
-   a data-fetcher's ``fetched`` counter by ``batch_progress.current.ready``; without a
-   fetcher, the equivalent here is to drain that many batches before the main loop.
-
-These tests pin both: the restart flag propagates to the epoch loop, and a mid-epoch
-resume actually skips the already-processed batches (training_step runs only for the
-remaining tail, not the full epoch again).
+2. For a plain (non-stateful) loader, a mid-epoch resume is honest: the dataloader
+   is rebuilt fresh and re-yields from batch 0, so the epoch's ``batch_progress``
+   is reset to zero (not a fictional mid-epoch value) and the whole epoch is
+   re-processed. A stateful loader — one that exposes ``state_dict``/
+   ``load_state_dict`` — is the opt-in for a genuine mid-epoch skip.
 """
 
 import os
@@ -80,7 +77,8 @@ def _forge_mid_epoch(path, epoch=0, ready=3):
 
 def test_restarting_cascades_on_resume(tmp_path):
     """Direct probe of the restore path (no run): the epoch loop's restart flag must
-    be set to True after ``fit_loop.load_state_dict``, mirroring Lightning's cascade."""
+    be True after ``fit_loop.load_state_dict`` — i.e. the property setter cascaded it
+    into the child loop, not merely set the bare field on the fit loop."""
     loops = {
         "epoch_loop": {
             "batch_progress": {
@@ -123,22 +121,22 @@ def test_resume_preserves_batch_progress_snapshot(tmp_path):
         logger=False,
         enable_checkpointing=False,
     )
-    # The restore happens inside fit; we don't run to completion — instead step the
-    # restore and read progress before the epoch end resets it. Use limit_train_batches=0
-    # so run() returns immediately after restore, exposing the loaded snapshot.
+    # The restore happens inside fit; we then run the epoch. With a non-stateful
+    # loader the epoch's batch_progress is reset to zero on restart and the epoch
+    # is processed in full, so ready advances from 0 to the number of batches run
+    # (8 here) — not the forged 3. This is the honest, non-fictional resume.
     trainer.fit(model, train_dataloaders=_dl(), ckpt_path=path)
-    # run() is a no-op with limit_train_batches=0, so batch_progress keeps the restored value
-    # (reset_on_restart preserves it; no increment happened).
-    assert trainer.fit_loop.epoch_loop.batch_progress.current.ready >= 3
+    assert trainer.fit_loop.epoch_loop.batch_progress.current.ready == 8
 
 
-def test_mid_epoch_resume_skips_processed_batches(tmp_path):
-    """Resuming into a mid-epoch checkpoint must not re-run already-processed batches.
+def test_mid_epoch_resume_reruns_epoch_when_not_stateful(tmp_path):
+    """A mid-epoch resume with a plain (non-stateful) loader re-runs the whole epoch.
 
-    Forged: epoch 0, 3 of 8 batches already processed. After resume with
-    limit_train_batches=8 the model's training_step runs exactly 8 - 3 = 5 times,
-    not 8. This mirrors Lightning advancing ``data_fetcher.fetched`` by
-    ``batch_progress.current.ready`` (here, a pre-loop drain without a fetcher).
+    Forged: epoch 0, 3 of 8 batches marked already-processed. The dataloader is a
+    plain Paddle loader with no load_state_dict, so it is rebuilt fresh on resume and
+    re-yields from batch 0. Ocean reports this honestly: the epoch's batch progress
+    resets to zero and training_step runs the whole epoch (8 batches), with batch_idx
+    starting at 0. There is no true mid-epoch skip without a stateful loader.
     """
     path = _fit_and_save(tmp_path, _CountingModel(), limit_train_batches=8)
     _forge_mid_epoch(path, epoch=0, ready=3)
@@ -154,7 +152,79 @@ def test_mid_epoch_resume_skips_processed_batches(tmp_path):
     )
     trainer.fit(model, train_dataloaders=_dl(), ckpt_path=path)
 
-    assert model.train_calls == 5, (
-        f"expected 5 training_step calls (8 batches - 3 already done), "
-        f"got {model.train_calls} — skipped batches were re-processed"
+    # The whole epoch is re-processed (8, not the 5 a stateful skip would give);
+    # batch progress within the epoch started from zero since the loader is not
+    # resumable. Across-epoch numbers (epoch, dataloader_step) still restore.
+    assert model.train_calls == 8, (
+        f"expected 8 training_step calls (full epoch re-run for non-stateful loader), got {model.train_calls}"
     )
+    assert trainer.current_epoch == 1
+
+
+# --------------------------------------------------------------------------
+# CombinedLoader loader-state pipeline (opt-in for a stateful loader)
+# --------------------------------------------------------------------------
+
+
+class _StatefulFake:
+    """A minimal object that opts into loader persistence by exposing state_dict."""
+
+    def __init__(self, payload=None):
+        self._payload = payload if payload is not None else {"v": 1}
+
+    def state_dict(self):
+        return dict(self._payload)
+
+    def load_state_dict(self, state):
+        self._payload = dict(state)
+
+
+def test_combined_loader_state_dicts_filters_stateful(tmp_path):
+    from ocean.utils.combined_loader import CombinedLoader
+
+    stateful = _StatefulFake({"v": 7})
+
+    class _Plain:
+        pass  # plain loader: no state_dict, must be silently skipped
+
+        def __iter__(self):
+            return iter([])
+
+    cl = CombinedLoader([stateful, _Plain()], mode="sequential")
+    states = cl._state_dicts()
+    assert len(states) == 1, "only the stateful loader should contribute state"
+    assert states[0] == {"v": 7}
+
+
+def test_combined_loader_load_state_dict_count_mismatch_raises(tmp_path):
+    import pytest
+
+    from ocean.utils.combined_loader import CombinedLoader
+
+    stateful = _StatefulFake()
+    cl = CombinedLoader([stateful], mode="sequential")
+    with pytest.raises(RuntimeError):
+        cl._load_state_dicts([{"a": 1}, {"b": 2}])  # two states, one stateful loader
+    # matching count restores without error
+    cl._load_state_dicts([{"v": 9}])
+    assert stateful._payload == {"v": 9}
+
+
+def test_restore_records_loader_state_into_fit_loop(tmp_path):
+    """A checkpoint carrying a ``combined_loader`` key is staged on the fit loop;
+
+    a checkpoint without it (plain loaders / old checkpoints) stages nothing.
+    """
+    model = _CountingModel()
+    path = _fit_and_save(tmp_path, model, limit_train_batches=2)
+    trainer = ocean.Trainer(
+        max_epochs=1,
+        limit_train_batches=0,
+        limit_val_batches=0,
+        num_sanity_val_steps=0,
+        logger=False,
+        enable_checkpointing=False,
+    )
+    # A plain Paddle loader contributes no state, so checkpoint has no combined_loader.
+    trainer.fit(model, train_dataloaders=_dl(), ckpt_path=path)
+    assert getattr(trainer.fit_loop, "_combined_loader_states_to_load", None) in ([], None)

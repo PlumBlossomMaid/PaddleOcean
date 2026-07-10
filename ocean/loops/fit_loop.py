@@ -1,7 +1,7 @@
 """_FitLoop - orchestrates training across epochs.
 
 Counts epochs and delegates each epoch's batch loop to :class:`_TrainingEpochLoop`.
-The nested structure mirrors the reference design::
+The nested structure is the natural fit for this division of labour::
 
     for epoch in epochs:          # _FitLoop
         for batch in train_dl:    # _TrainingEpochLoop
@@ -24,6 +24,44 @@ class _FitLoop(_Loop):
         self.min_epochs = min_epochs
         self.max_epochs = max_epochs or 1000
         self.epoch_loop = _TrainingEpochLoop(trainer)
+        # Loader-state pipeline: the combined loader wraps the raw train dataloader
+        # so it can carry and restore per-loader state dicts at checkpoint time.
+        # ``_combined_loader_states_to_load`` is staged by
+        # ``_CheckpointConnector.restore`` and consumed once on the next ``run()``,
+        # only when actually restarting. With plain Paddle loaders these lists stay
+        # empty — the pipeline is a no-op and behaviour is unchanged, but it is the
+        # opt-in point for a loader that chooses to be stateful.
+        self._combined_loader = None
+        self._combined_loader_states_to_load: list = []
+
+    def _setup_combined_loader(self, train_loader: Any) -> None:
+        """Wrap the raw train loader in a CombinedLoader.
+
+        For a single train loader this is the trivial sequential wrapper. The
+        wrapper is what ``_TrainingEpochLoop._is_resumable_loader`` probes for
+        statefulness, so building it up-front keeps that probe valid even before the
+        first epoch runs.
+        """
+        from ocean.utils.combined_loader import CombinedLoader
+
+        self._combined_loader = (
+            train_loader
+            if isinstance(train_loader, CombinedLoader)
+            else CombinedLoader(train_loader, mode="sequential")
+        )
+
+    def _load_combined_loader_states(self) -> None:
+        """Apply staged loader state only when restarting and state was staged.
+
+        A fresh (non-resume) run, or a plain non-stateful loader, fails the guard
+        and nothing is seeded — the epoch runs from batch 0. After the staged list
+        is consumed it is released so it can only be applied once.
+        """
+        states = self._combined_loader_states_to_load
+        if not self.restarting or not states or self._combined_loader is None:
+            return
+        self._combined_loader._load_state_dicts(states)
+        self._combined_loader_states_to_load = []
 
     @property
     def done(self) -> bool:
@@ -74,6 +112,14 @@ class _FitLoop(_Loop):
         while not self.done:
             # Optionally rebuild the training dataloader from the datamodule.
             self._reload_train_dataloader_if_needed()
+
+            # Wrap the (possibly just-rebuilt) train loader for the combined-loader
+            # pipeline. ``_load_combined_loader_states`` is a guarded no-op except on
+            # the restarting epoch where staged restore state is applied once; on a
+            # reload epoch the wrapper switches to the fresh loader and nothing is
+            # reseeded, matching how a plain non-stateful loader re-yields from 0.
+            self._setup_combined_loader(trainer.train_dataloader)
+            self._load_combined_loader_states()
 
             # Fresh accumulation each epoch (weighted means are per-epoch).
             trainer._results = _ResultCollection(training=True, fork_names=False)

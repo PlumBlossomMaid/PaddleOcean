@@ -49,17 +49,41 @@ class _TrainingEpochLoop(_Loop):
         """True when gradients should keep accumulating (no optimizer step yet)."""
         return not self._accumulated_batches_reached() and not self._num_ready_batches_reached()
 
+    def _is_resumable_loader(self) -> bool:
+        """Whether every train loader in the combined loader is stateful.
+
+        A loader is considered stateful here when it exposes a ``state_dict``
+        method (the ability to persist and restore its own iteration state). Only
+        then is a mid-epoch resume meaningful: such a loader re-yields the
+        already-skipped batches on restart, so its ``batch_progress`` is worth
+        preserving. Plain Paddle loaders are not stateful and re-yield from batch 0,
+        so reporting any preserved mid-epoch progress would be wrong.
+        """
+        loader = getattr(self.trainer.fit_loop, "_combined_loader", None)
+        if loader is None:
+            return False
+        flattened = getattr(loader, "flattened", None)
+        if not flattened:
+            return False
+        return all(hasattr(ld, "state_dict") for ld in flattened)
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
     def run(self) -> None:
         trainer = self.trainer
         model = trainer._model
-        train_loader = getattr(trainer, "train_dataloader", None)
+        train_loader = getattr(trainer.fit_loop, "_combined_loader", None) or getattr(trainer, "train_dataloader", None)
         if train_loader is None:
             return
 
-        if self.restarting:
+        # On restart, preserve the epoch's batch_progress only when the loader is
+        # stateful, so a resumed dataloader that genuinely skips already-processed
+        # batches keeps counting from where it stopped. A plain (non-stateful) loader
+        # is rebuilt fresh from the checkpoint and re-yields from batch 0, so it is
+        # reset to zero — preserving a mid-epoch count here would describe progress
+        # the data does not actually have. The epoch then runs plainly from batch 0.
+        if self.restarting and self._is_resumable_loader():
             self.batch_progress.reset_on_restart()
         else:
             self.batch_progress.reset_on_run()
@@ -67,21 +91,13 @@ class _TrainingEpochLoop(_Loop):
         device = trainer._resolve_device()
         max_batches = self._max_batches
 
-        # On restart, skip the batches this epoch had already consumed before the
-        # checkpoint. Lightning tracks this by advancing a data-fetcher's `fetched`
-        # counter by `batch_progress.current.ready` in `on_run_start`; without a
-        # fetcher here, the equivalent is to drain that many batches from the
-        # loader before entering the main loop. `enumerate(..., start=...)` keeps
-        # batch_idx continuous (matching Lightning's `batch_idx = self.batch_idx + 1`)
-        # so hooks, logging, and mid-epoch validation see a true index.
-        skip_batches = self.batch_progress.current.ready
-        loader_iter = iter(train_loader)
-        if skip_batches > 0:
-            for _ in range(skip_batches):
-                if next(loader_iter, None) is None:
-                    break
-
-        for batch_idx, batch in enumerate(loader_iter, start=skip_batches):
+        # The loader is iterated directly (no prefetch fetcher): on resume with a
+        # plain non-stateful loader it re-yields from batch 0, so the epoch is
+        # honestly reprocessed and batch_idx starts at 0. A ``_Stateful`` loader
+        # (future: a Paddle ``StatefulDataLoader`` equivalent) would resume mid-epoch
+        # because its ``__iter__`` yields the already-skipped batches, in which case
+        # batch_idx still from 0 is correct since the iterator itself advanced.
+        for batch_idx, batch in enumerate(iter(train_loader)):
             if trainer._should_limit_batches(batch_idx, "train"):
                 break
             if max_batches and batch_idx >= max_batches:
