@@ -34,3 +34,6 @@ build/
 *.pdparams
 ocean_logs/
 log/
+
+# Sphinx docs build
+docs/_build/

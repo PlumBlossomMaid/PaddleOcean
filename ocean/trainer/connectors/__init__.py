@@ -13,8 +13,21 @@ import ocean
 from ocean.callbacks.callback import Callback
 from ocean.callbacks.checkpoint import ModelCheckpoint
 from ocean.callbacks.progress import ProgressBar
-from ocean.loggers.base import Logger
-from ocean.loggers.csv_logs import CSVLogger
+
+# _LoggerConnector now lives in the logger_connector/ subpackage alongside the
+# _ResultCollection it delegates metric storage to. Re-exported here so existing
+# ``from ocean.trainer.connectors import _LoggerConnector`` imports keep working.
+from ocean.trainer.connectors.logger_connector import _LoggerConnector
+from ocean.utils import MisconfigurationException
+
+__all__ = [
+    "_DataConnector",
+    "_LoggerConnector",
+    "_CallbackConnector",
+    "_CheckpointConnector",
+    "_SignalConnector",
+    "_AcceleratorConnector",
+]
 
 # ====================================================================
 # Data Connector
@@ -33,13 +46,56 @@ class _DataConnector:
         reload_dataloaders_every_n_epochs: int,
         check_val_every_n_epoch: Optional[int],
     ) -> None:
+        # Validate at construction time so misconfiguration fails fast, rather than
+        # silently mis-scheduling (or skipping) validation once fit() runs.
+        if check_val_every_n_epoch is not None and not isinstance(check_val_every_n_epoch, int):
+            raise MisconfigurationException(
+                f"`check_val_every_n_epoch` should be an integer, found {check_val_every_n_epoch!r}."
+            )
+
+        if check_val_every_n_epoch is None and isinstance(val_check_interval, float):
+            raise MisconfigurationException(
+                "`val_check_interval` should be an integer or a time-based duration "
+                "(str 'DD:HH:MM:SS', datetime.timedelta, or dict kwargs for timedelta) "
+                "when `check_val_every_n_epoch=None`."
+            )
+
+        if not isinstance(reload_dataloaders_every_n_epochs, int) or reload_dataloaders_every_n_epochs < 0:
+            raise MisconfigurationException(
+                f"`reload_dataloaders_every_n_epochs` should be an int >= 0, got {reload_dataloaders_every_n_epochs!r}."
+            )
+
         self.trainer.val_check_interval = val_check_interval
         self.trainer.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
         self.trainer.check_val_every_n_epoch = check_val_every_n_epoch
 
     def prepare_data(self) -> None:
-        if self.trainer.datamodule is not None:
-            self.trainer.datamodule.prepare_data()
+        """Run datamodule.prepare_data() under rank gating + a barrier.
+
+        Downloads/preprocessing must happen on a single process to avoid races
+        on shared storage. ``prepare_data_per_node`` (default True) runs it once
+        per node (local rank 0); when False it runs only on global rank 0. Other
+        ranks wait at the barrier until preparation completes.
+        """
+        datamodule = self.trainer.datamodule
+        if datamodule is None:
+            return
+
+        strategy = getattr(self.trainer, "strategy", None)
+        local_rank = getattr(strategy, "local_rank", 0) if strategy is not None else 0
+        node_rank = getattr(strategy, "node_rank", 0) if strategy is not None else 0
+        local_rank_zero = local_rank == 0
+        global_rank_zero = local_rank == 0 and node_rank == 0
+
+        per_node = getattr(datamodule, "prepare_data_per_node", True)
+        should_prepare = local_rank_zero if per_node else global_rank_zero
+
+        if should_prepare:
+            datamodule.prepare_data()
+
+        # Ranks that skipped preparation wait here until it finishes.
+        if strategy is not None and hasattr(strategy, "barrier"):
+            strategy.barrier("prepare_data")
 
     def attach_data(
         self,
@@ -53,105 +109,20 @@ class _DataConnector:
         self.trainer.datamodule = datamodule
         if datamodule is not None:
             datamodule.trainer = self.trainer
+            # prepare_data (download/preprocess, rank-gated) must precede setup.
+            self.prepare_data()
             datamodule.setup("fit")
             self.trainer.train_dataloader = train_dataloaders or datamodule.train_dataloader()
             self.trainer.val_dataloaders = val_dataloaders or [datamodule.val_dataloader()]
+            # Keep test/predict channels defined for later test()/predict() calls,
+            # symmetric with the explicit-dataloaders branch below.
+            self.trainer.test_dataloaders = [test_dataloaders] if test_dataloaders is not None else []
+            self.trainer.predict_dataloaders = [predict_dataloaders] if predict_dataloaders is not None else []
         else:
             self.trainer.train_dataloader = train_dataloaders
             self.trainer.val_dataloaders = [val_dataloaders] if val_dataloaders is not None else []
             self.trainer.test_dataloaders = [test_dataloaders] if test_dataloaders is not None else []
             self.trainer.predict_dataloaders = [predict_dataloaders] if predict_dataloaders is not None else []
-
-
-# ====================================================================
-# Logger Connector
-# ====================================================================
-
-
-class _LoggerConnector:
-    """Manages logging: metric tracking, result collection, logger dispatch."""
-
-    def __init__(self, trainer: Any) -> None:
-        self.trainer = trainer
-        self._callback_metrics: dict[str, float] = {}
-        self._logged_metrics: dict[str, float] = {}
-        self._progress_bar_metrics: dict[str, float] = {}
-        self._metrics_buffer: dict[str, list[float]] = {}
-        self._reset_all_metrics()
-
-    def on_trainer_init(self, logger: Any, log_every_n_steps: int) -> None:
-        self.configure_logger(logger)
-        self.trainer.log_every_n_steps = log_every_n_steps
-
-    def configure_logger(self, logger: Any) -> None:
-        """Configure logger from bool/None/Logger/list."""
-        if logger is False:
-            self.trainer.loggers = []
-        elif logger is True or logger is None:
-            self.trainer.loggers = [CSVLogger(root_dir=self.trainer.default_root_dir or ".")]
-        elif isinstance(logger, Logger):
-            self.trainer.loggers = [logger]
-        elif isinstance(logger, (list, tuple)):
-            self.trainer.loggers = list(logger)
-
-    def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
-        """Log metrics — delegates to each logger (which filter by rank internally)."""
-        for lg in getattr(self.trainer, "loggers", None) or []:
-            if hasattr(lg, "log_metrics"):
-                lg.log_metrics(metrics, step)
-
-    def reset_validation_metrics(self) -> None:
-        """Clear all val/test metrics after validation.
-
-        Clears both ``_logged_metrics`` and ``_metrics_buffer`` so stale
-        validation values (e.g. ``loss/val`` which doesn't start with
-        ``val/``) do not leak into training step-0 log flushes.
-        """
-        self._logged_metrics.clear()
-        self._metrics_buffer.clear()
-
-    def _reset_all_metrics(self) -> None:
-        self._callback_metrics = {}
-        self._logged_metrics = {}
-        self._progress_bar_metrics = {}
-
-    @property
-    def callback_metrics(self) -> dict[str, float]:
-        return self._callback_metrics
-
-    @property
-    def logged_metrics(self) -> dict[str, float]:
-        return self._logged_metrics
-
-    @property
-    def progress_bar_metrics(self) -> dict[str, float]:
-        return self._progress_bar_metrics
-
-    def update_train_step_metrics(self) -> None:
-        """Aggregate step-level metrics."""
-        pass
-
-    def update_train_epoch_metrics(self) -> None:
-        """Aggregate epoch-level metrics."""
-        for name, values in self._metrics_buffer.items():
-            if values:
-                mean_val = float(sum(values)) / len(values)
-                self._callback_metrics[name] = mean_val
-                self._logged_metrics[name] = mean_val
-        self._metrics_buffer.clear()
-
-    def log_metric_value(self, name: str, value: float, prog_bar: bool = False, logger: bool = True) -> None:
-        self._callback_metrics[name] = value
-        if logger:
-            self._logged_metrics[name] = value
-        if prog_bar:
-            self._progress_bar_metrics[name] = value
-        if name not in self._metrics_buffer:
-            self._metrics_buffer[name] = []
-        self._metrics_buffer[name].append(value)
-
-    def teardown(self) -> None:
-        pass
 
 
 # ====================================================================
@@ -184,15 +155,60 @@ class _CallbackConnector:
             from ocean.callbacks.timer import Timer
 
             callbacks.append(Timer(duration=max_time))
-        self.trainer.callbacks = callbacks
+        self.trainer.callbacks = self._reorder_callbacks(callbacks)
 
     def _attach_model_callbacks(self) -> None:
-        """Attach callbacks from configure_callbacks() hook."""
+        """Attach callbacks from the model's configure_callbacks() hook.
+
+        A model callback whose type matches (or subclasses) a trainer callback
+        replaces it, so a model-provided ModelCheckpoint doesn't coexist with the
+        default one. Checkpoint callbacks are then reordered to run last.
+        """
         model = self.trainer._model
-        if hasattr(model, "configure_callbacks"):
-            extra = model.configure_callbacks()
-            if extra:
-                self.trainer.callbacks.extend(extra)
+        if not hasattr(model, "configure_callbacks"):
+            return
+        model_callbacks = model.configure_callbacks()
+        if not model_callbacks:
+            return
+        if not isinstance(model_callbacks, (list, tuple)):
+            model_callbacks = [model_callbacks]
+
+        model_types = {type(c) for c in model_callbacks}
+        # A trainer callback is overridden if a model callback is the same type
+        # or a subclass of it.
+        override_types = set()
+        for trainer_cb in self.trainer.callbacks:
+            t_type = type(trainer_cb)
+            if t_type is Callback:
+                continue
+            if any(issubclass(m_type, t_type) for m_type in model_types):
+                override_types.add(t_type)
+
+        kept = [c for c in self.trainer.callbacks if type(c) not in override_types]
+        kept.extend(model_callbacks)
+        self.trainer.callbacks = self._reorder_callbacks(kept)
+
+    @staticmethod
+    def _reorder_callbacks(callbacks: list) -> list:
+        """Order callbacks so tuner callbacks run first and checkpoint callbacks last.
+
+        Checkpoint callbacks must run after callbacks that update metrics (so a
+        monitored value is current when a checkpoint is written). Relative order
+        within each group is preserved.
+        """
+        from ocean.callbacks.batch_size_finder import BatchSizeFinder
+        from ocean.callbacks.lr_finder import LRFinder
+        from ocean.callbacks.on_exception_checkpoint import OnExceptionCheckpoint
+
+        tuner, other, checkpoint = [], [], []
+        for cb in callbacks:
+            if isinstance(cb, (BatchSizeFinder, LRFinder)):
+                tuner.append(cb)
+            elif isinstance(cb, (ModelCheckpoint, OnExceptionCheckpoint)):
+                checkpoint.append(cb)
+            else:
+                other.append(cb)
+        return tuner + other + checkpoint
 
 
 # ====================================================================
@@ -242,8 +258,23 @@ class _CheckpointConnector:
                 if pname in ckpt and hasattr(pp, "load_state_dict"):
                     pp.load_state_dict(ckpt[pname])
 
+            # Restore datamodule state saved under its qualified name (dump side).
+            datamodule = self.trainer.datamodule
+            if datamodule is not None and hasattr(datamodule, "load_state_dict"):
+                dm_key = type(datamodule).__qualname__
+                if dm_key in ckpt:
+                    datamodule.load_state_dict(ckpt[dm_key])
+
         if "epoch" in ckpt:
-            self.trainer.current_epoch = ckpt["epoch"]
+            restored_epoch = ckpt["epoch"]
+            # Guard against resuming past the configured training budget.
+            max_epochs = getattr(self.trainer, "max_epochs", None)
+            if max_epochs is not None and max_epochs != -1 and restored_epoch > max_epochs:
+                raise MisconfigurationException(
+                    f"You restored a checkpoint with current_epoch={restored_epoch}, but you have "
+                    f"set Trainer(max_epochs={max_epochs}). Increase max_epochs to continue training."
+                )
+            self.trainer.current_epoch = restored_epoch
         if "dataloader_step" in ckpt:
             self.trainer._dataloader_step = ckpt["dataloader_step"]
         if "optimizer_step" in ckpt:
@@ -251,6 +282,13 @@ class _CheckpointConnector:
 
         if "loops" in ckpt:
             self.trainer.fit_loop.load_state_dict(ckpt["loops"])
+
+        # Restore hparams and any custom state added via on_save_checkpoint(),
+        # symmetric with dump_checkpoint().
+        if "hparams" in ckpt and hasattr(model, "hparams"):
+            model.hparams = ckpt["hparams"]
+        if hasattr(model, "on_load_checkpoint"):
+            model.on_load_checkpoint(ckpt)
 
     def dump_checkpoint(self, weights_only: bool = False) -> dict:
         """Build a complete checkpoint dictionary."""
@@ -310,17 +348,49 @@ class _CheckpointConnector:
 
 
 class _SignalConnector:
-    """Manages signal handlers for graceful shutdown."""
+    """Installs a SIGTERM handler for graceful shutdown.
+
+    On SIGTERM (e.g. cluster preemption or ``kill``) the trainer is asked to stop
+    at the next loop boundary — ``should_stop`` is honored by the fit loop — so an
+    end-of-epoch checkpoint callback can still run. Original handlers are restored
+    on teardown.
+    """
 
     def __init__(self, trainer: Any) -> None:
         self.trainer = trainer
         self.received_sigterm = False
+        self._original_handlers: dict = {}
 
     def register_signal_handlers(self) -> None:
-        pass
+        import signal
+        import threading
+
+        self.received_sigterm = False
+        self._original_handlers = {}
+        # Signal handlers can only be installed from the main thread.
+        if threading.current_thread() is not threading.main_thread():
+            return
+        try:
+            self._original_handlers[signal.SIGTERM] = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, self._sigterm_handler)
+        except (ValueError, OSError):
+            # e.g. unsupported platform / not permitted; leave defaults in place.
+            self._original_handlers.pop(signal.SIGTERM, None)
+
+    def _sigterm_handler(self, signum: Any, frame: Any) -> None:
+        self.received_sigterm = True
+        # Request a graceful stop; the fit loop checks should_stop each epoch.
+        self.trainer.should_stop = True
 
     def teardown(self) -> None:
-        pass
+        import signal
+
+        for signum, handler in self._original_handlers.items():
+            try:
+                signal.signal(signum, handler)
+            except (ValueError, OSError, TypeError):
+                pass
+        self._original_handlers = {}
 
 
 # ====================================================================
@@ -457,8 +527,13 @@ class _AcceleratorConnector:
                 import ocean.distributed as odist
 
                 odist.fleet.init(is_collective=True)
-            except Exception:
-                pass
+            except Exception as e:
+                import warnings
+
+                warnings.warn(
+                    f"fleet initialization failed: {e}. Distributed collectives may not work; "
+                    "ensure the process was launched with a distributed launcher."
+                )
             return ds
 
         if strategy == "single_device":
@@ -490,11 +565,11 @@ class _AcceleratorConnector:
 
     @staticmethod
     def _set_flags(deterministic: Any = None, benchmark: Any = None) -> None:
-        """Set flags for deterministic/benchmark modes.
+        """Set deterministic / benchmark mode flags.
 
-        Mirrors paddleOcean's _set_torch_flags.
-        PaddlePaddle may not support cudnn flags via set_flags on all builds,
-        so we use try/except and fall back to environment variables.
+        PaddlePaddle may not support cudnn flags via ``set_flags`` on all builds,
+        so each call is guarded; the deterministic workspace config is also set
+        via an environment variable.
         """
         import os
 
@@ -506,7 +581,6 @@ class _AcceleratorConnector:
 
                 warnings.warn("deterministic=True is incompatible with benchmark=True")
 
-            # Set PaddlePaddle deterministic flags
             try:
                 paddle.set_flags({"FLAGS_cudnn_deterministic": True})
             except ValueError:
@@ -518,16 +592,3 @@ class _AcceleratorConnector:
                 paddle.set_flags({"FLAGS_cudnn_benchmark": benchmark})
             except ValueError:
                 pass
-
-        if deterministic is True:
-            try:
-                paddle.set_flags({"FLAGS_cudnn_deterministic": True})
-            except ValueError:
-                pass
-            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        elif deterministic == "warn":
-            try:
-                paddle.set_flags({"FLAGS_cudnn_deterministic": True})
-            except ValueError:
-                pass
-            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
