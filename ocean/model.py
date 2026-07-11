@@ -67,16 +67,19 @@ class Model(nn.Layer):
 
     @property
     def global_step(self) -> int:
-        """Training step count (ocean-compatible)."""
-        return self.dataloader_step
+        """Number of optimizer steps performed so far.
+
+        Counts only real optimizer steps (how many times the optimizer has been
+        stepped), not raw batches seen. With ``accumulate_grad_batches > 1``
+        this advances ``1`` per ``accumulate_grad_batches`` batches, staying
+        aligned with learning-rate-scheduler / logging cadence. Use
+        :attr:`dataloader_step` for raw batch counts.
+        """
+        return self._trainer.optimizer_step if self._trainer else 0
 
     @property
     def dataloader_step(self) -> int:
         return self._trainer.dataloader_step if self._trainer else 0
-
-    @property
-    def optimizer_step(self) -> int:
-        return self._trainer.optimizer_step if self._trainer else 0
 
     @property
     def global_rank(self) -> int:
@@ -259,6 +262,38 @@ class Model(nn.Layer):
         """Override to customize backward (ocean-compatible)."""
         loss.backward(*args, **kwargs)
 
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: paddle.optimizer.Optimizer,
+        optimizer_closure: Any = None,
+    ) -> None:
+        """Override to customize the optimizer step.
+
+        Called by the automatic-optimization loop in place of a raw
+        ``optimizer.step()``. The default routes through ``trainer.strategy``
+        so AMP/GradScaler semantics are preserved. Paddle optimizers don't
+        accept a closure, so ``optimizer_closure`` is accepted for signature
+        parity but unused here (the forward/backward already ran inline).
+        """
+        trainer = self._trainer
+        if trainer is not None and trainer.strategy is not None:
+            trainer.strategy.optimizer_step(optimizer)
+        else:
+            optimizer.step()
+
+    def optimizer_zero_grad(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: paddle.optimizer.Optimizer,
+    ) -> None:
+        """Override to customize gradient zeroing (e.g. set-to-none)."""
+        optimizer.clear_grad()
+
+    # Backward-compatible aliases for the legacy hook names. They delegate to
+    # the canonical names above so user overrides of either form still fire.
     def on_optimizer_step(
         self,
         epoch: int,
@@ -267,7 +302,7 @@ class Model(nn.Layer):
         optimizer_closure: Any = None,
     ) -> None:
         """Override to customize optimizer step."""
-        optimizer.step()
+        self.optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
 
     def optimizer_clear_grad(
         self,
@@ -275,7 +310,7 @@ class Model(nn.Layer):
         batch_idx: int,
         optimizer: paddle.optimizer.Optimizer,
     ) -> None:
-        optimizer.clear_grad()
+        self.optimizer_zero_grad(epoch, batch_idx, optimizer)
 
     def lr_scheduler_step(
         self,
@@ -433,7 +468,7 @@ class Model(nn.Layer):
             state["optimizer"] = self._optimizer.state_dict()
         state["epoch"] = self.current_epoch
         state["dataloader_step"] = self.dataloader_step
-        state["optimizer_step"] = self.optimizer_step
+        state["optimizer_step"] = self._trainer.optimizer_step if self._trainer else 0
         paddle.save(state, path)
 
     def load_checkpoint(
