@@ -4,6 +4,10 @@ import inspect
 from copy import deepcopy
 from typing import Any, Optional
 
+import paddle
+
+from ocean.utils import rank_zero_warn
+
 
 class AttributeDict(dict):
     """A dict with attribute-style access."""
@@ -50,34 +54,35 @@ class HyperparametersMixin:
         """
         frame = inspect.currentframe()
         if frame is None:
-            return
+            raise RuntimeError(
+                "save_hyperparameters needs the CPython frame to introspect "
+                "__init__ locals, which is unavailable on this interpreter."
+            )
         try:
             parent_frame = frame.f_back
             if parent_frame is None:
-                return
+                raise RuntimeError(
+                    "save_hyperparameters could not locate the calling frame; call it directly inside __init__."
+                )
             if len(args) == 0:
-                # Auto-capture all __init__ parameters
+                # Auto-capture all __init__ parameters. inspect.signature on a
+                # bound method already drops `self`, so don't slice again (doing
+                # so would silently lose the first real parameter).
                 init_sig = inspect.signature(self.__init__)
-                init_params = list(init_sig.parameters.keys())[1:]  # skip self
+                init_params = list(init_sig.parameters.keys())
                 hp = {}
                 for name in init_params:
                     if name in parent_frame.f_locals:
-                        val = parent_frame.f_locals[name]
-                        if not self._is_serializable(val):
-                            val = str(type(val).__name__)
-                        hp[name] = val
+                        hp[name] = self._normalize_hparam(name, parent_frame.f_locals[name])
             elif len(args) == 1 and isinstance(args[0], dict):
-                hp = dict(args[0])
+                hp = {k: self._normalize_hparam(k, v) for k, v in args[0].items()}
             elif len(args) == 1 and hasattr(args[0], "__dict__"):
-                hp = dict(vars(args[0]))
+                hp = {k: self._normalize_hparam(k, v) for k, v in vars(args[0]).items()}
             else:
                 hp = {}
                 for arg in args:
                     if isinstance(arg, str) and arg in parent_frame.f_locals:
-                        val = parent_frame.f_locals[arg]
-                        if not self._is_serializable(val):
-                            val = str(type(val).__name__)
-                        hp[arg] = val
+                        hp[arg] = self._normalize_hparam(arg, parent_frame.f_locals[arg])
 
             if ignore:
                 for key in ignore:
@@ -87,6 +92,40 @@ class HyperparametersMixin:
             self._hparams_initial = deepcopy(hp)
         finally:
             del frame
+
+    def _normalize_hparam(self, name: str, val: Any) -> Any:
+        """Coerce a value into something serializable as a hyperparameter.
+
+        Scalars and built-in containers survive; paddle/numpy tensors are pulled
+        down to Python scalars (item/tolist) so their value is recorded rather
+        than dropped. Anything else is logged as a type-name placeholder and a
+        rank-zero warning warns that the value itself wasn't stored — instead of
+        silently storing just the class name with no indication anything was lost.
+        """
+        if isinstance(val, (int, float, str, bool, type(None), list, tuple, dict)):
+            return val
+        # Paddle scalar -> python number; numpy scalar/list -> python
+        if isinstance(val, paddle.Tensor):
+            try:
+                if val.numel() == 1:
+                    return val.item()
+                return val.tolist()
+            except Exception:  # noqa: BLE001
+                pass
+        if "numpy" in str(type(val).__module__):
+            try:
+                if val.ndim == 0:
+                    return val.item()
+                return val.tolist()
+            except Exception:  # noqa: BLE001
+                pass
+        placeholder = f"<{type(val).__name__}>"
+        rank_zero_warn(
+            f"Hyperparameter {name!r} of type {type(val).__name__} is not "
+            f"serializable and was stored as the placeholder {placeholder!r} "
+            f"rather than its value.",
+        )
+        return placeholder
 
     def _is_serializable(self, val: Any) -> bool:
         return isinstance(val, (int, float, str, bool, type(None), list, tuple, dict))
