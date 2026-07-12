@@ -59,12 +59,15 @@ class _AutomaticOptimization:
                 self._clip_gradients(model, raw_opt)
                 model.on_before_optimizer_step(raw_opt)
                 _call_callback_hooks(trainer, "on_before_optimizer_step", raw_opt)
-                # Step through strategy for scaler.step()/update()
-                trainer.strategy.optimizer_step(raw_opt)
+                # Route the step/zero_grad through the model hooks so user
+                # overrides of optimizer_step / optimizer_zero_grad actually
+                # fire. The defaults delegate to trainer.strategy.optimizer_step
+                # (AMP scaler) and optimizer.clear_grad() respectively.
+                model.optimizer_step(trainer.current_epoch, batch_idx, raw_opt)
                 trainer._advance_optimizer_step()
                 model.on_before_zero_grad(raw_opt)
                 _call_callback_hooks(trainer, "on_before_zero_grad", raw_opt)
-                optimizer.clear_grad()
+                model.optimizer_zero_grad(trainer.current_epoch, batch_idx, raw_opt)
 
         return result if isinstance(result, dict) else {"loss": loss}
 
