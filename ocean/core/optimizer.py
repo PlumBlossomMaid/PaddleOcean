@@ -5,6 +5,8 @@ from typing import Any, Optional
 
 import paddle
 
+from ocean.utils import MisconfigurationException
+
 
 class OceanOptimizer:
     """Wrapper around a Paddle optimizer that adds hooks for the training loop.
@@ -93,8 +95,38 @@ def init_optimizers_and_lr_schedulers(model: Any) -> tuple[list, list]:
                 }
             ]
 
+    _validate_schedulers(lr_schedulers)
     _warn_unbound_schedulers(optimizers, lr_schedulers)
     return optimizers, lr_schedulers
+
+
+def _validate_schedulers(lr_schedulers: list) -> None:
+    """Reject misconfigurations that would otherwise fail silently at step time.
+
+    A ``ReduceOnPlateau`` scheduler calls ``step(metric)`` and needs a monitored
+    metric; without one it has nothing to react to. Fail fast rather than
+    passing ``None`` to ``step`` at runtime.
+    """
+    plateau_type = None
+    try:
+        plateau_type = paddle.optimizer.lr.ReduceOnPlateau
+    except AttributeError:  # older paddle without ReduceOnPlateau
+        plateau_type = None
+    for cfg in lr_schedulers:
+        scheduler = cfg["scheduler"]
+        is_plateau = plateau_type is not None and isinstance(scheduler, plateau_type)
+        if is_plateau and cfg.get("monitor") is None:
+            raise MisconfigurationException(
+                "The lr scheduler dict must include a `monitor` when a "
+                "`ReduceOnPlateau` scheduler is used. For example: "
+                "{'optimizer': optimizer, 'lr_scheduler': "
+                "{'scheduler': scheduler, 'monitor': 'your_loss'}}"
+            )
+        interval = cfg.get("interval", "epoch")
+        if interval not in ("epoch", "step"):
+            raise MisconfigurationException(
+                f'The "interval" key in lr scheduler dict must be "step" or "epoch" but is "{interval}"'
+            )
 
 
 def _warn_unbound_schedulers(optimizers: list, lr_schedulers: list) -> None:
