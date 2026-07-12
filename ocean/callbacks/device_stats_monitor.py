@@ -30,6 +30,10 @@ class DeviceStatsMonitor(Callback):
     def _log_stats(self, trainer: Any, hook_name: str) -> None:
         if not getattr(trainer, "loggers", None):
             return
+        # Only rank 0 logs device stats (others would create duplicate VDL/CSV files)
+        if not getattr(trainer, "is_global_zero", True):
+            return
+
         import paddle
 
         stats = {}

@@ -67,16 +67,19 @@ class Model(nn.Layer):
 
     @property
     def global_step(self) -> int:
-        """Training step count (ocean-compatible)."""
-        return self.dataloader_step
+        """Number of optimizer steps performed so far.
+
+        Counts only real optimizer steps (how many times the optimizer has been
+        stepped), not raw batches seen. With ``accumulate_grad_batches > 1``
+        this advances ``1`` per ``accumulate_grad_batches`` batches, staying
+        aligned with learning-rate-scheduler / logging cadence. Use
+        :attr:`dataloader_step` for raw batch counts.
+        """
+        return self._trainer.optimizer_step if self._trainer else 0
 
     @property
     def dataloader_step(self) -> int:
         return self._trainer.dataloader_step if self._trainer else 0
-
-    @property
-    def optimizer_step(self) -> int:
-        return self._trainer.optimizer_step if self._trainer else 0
 
     @property
     def global_rank(self) -> int:
@@ -179,6 +182,10 @@ class Model(nn.Layer):
         self._metrics_name_cache = ["loss"] if self._loss_fns else []
         for m in self._metrics:
             name = m.name() if hasattr(m, "name") else m.__class__.__name__
+            # paddle.metric.* .name() returns a list (e.g. ['acc']); flatten to a
+            # single hashable string so it can be used as a metric key later.
+            if isinstance(name, (list, tuple)):
+                name = "_".join(str(n) for n in name) if name else m.__class__.__name__
             self._metrics_name_cache.append(name)
 
     # ====================================================================
@@ -190,14 +197,26 @@ class Model(nn.Layer):
             return self._keras_training_step(batch, batch_idx)
         raise NotImplementedError("training_step must be implemented")
 
-    def validation_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any: ...
-    def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any: ...
+    def validation_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
+        # Keras mode: fall back to forward + loss so Model.evaluate works out
+        # of the box. In Ocean mode the subclass is expected to override this;
+        # we keep a no-op default to stay compatible with existing usage that
+        # runs validation loops without a custom step.
+        if self.__model__ is not None:
+            return self._keras_eval_step(batch)
+        return None
+
+    def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
+        if self.__model__ is not None:
+            return self._keras_eval_step(batch)
+        return None
 
     def predict_step(self, batch: Any, batch_idx: int = 0) -> Any:
-        model = self.__model__ if self.__model__ is not None else self
+        # Route through self.forward so an overridden forward participates in
+        # prediction (rather than calling the wrapped network directly).
         if isinstance(batch, (list, tuple)):
-            return model(batch[0])
-        return model(batch)
+            return self(batch[0])
+        return self(batch)
 
     def configure_optimizers(self) -> Any:
         raise NotImplementedError("configure_optimizers must be implemented")
@@ -217,7 +236,17 @@ class Model(nn.Layer):
     def on_predict_start(self) -> None: ...
     def on_predict_end(self) -> None: ...
     def on_train_epoch_start(self) -> None: ...
-    def on_train_epoch_end(self) -> None: ...
+    def on_train_epoch_end(self) -> None:
+        # Keras mode: report accumulated metrics at the end of each training
+        # epoch and reset the accumulators. In Ocean mode this is a no-op so
+        # user overrides remain in control (a subclass overriding this hook is
+        # expected to call super().on_train_epoch_end() to keep reporting, or to
+        # do its own).
+        if self.__model__ is not None:
+            metrics = self._compute_metrics()
+            for name, value in metrics.items():
+                self.log(name, value, prog_bar=True)
+
     def on_validation_epoch_start(self) -> None: ...
     def on_validation_epoch_end(self) -> None: ...
     def on_test_epoch_start(self) -> None: ...
@@ -259,6 +288,38 @@ class Model(nn.Layer):
         """Override to customize backward (ocean-compatible)."""
         loss.backward(*args, **kwargs)
 
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: paddle.optimizer.Optimizer,
+        optimizer_closure: Any = None,
+    ) -> None:
+        """Override to customize the optimizer step.
+
+        Called by the automatic-optimization loop in place of a raw
+        ``optimizer.step()``. The default routes through ``trainer.strategy``
+        so AMP/GradScaler semantics are preserved. Paddle optimizers don't
+        accept a closure, so ``optimizer_closure`` is accepted for signature
+        parity but unused here (the forward/backward already ran inline).
+        """
+        trainer = self._trainer
+        if trainer is not None and trainer.strategy is not None:
+            trainer.strategy.optimizer_step(optimizer)
+        else:
+            optimizer.step()
+
+    def optimizer_zero_grad(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: paddle.optimizer.Optimizer,
+    ) -> None:
+        """Override to customize gradient zeroing (e.g. set-to-none)."""
+        optimizer.clear_grad()
+
+    # Backward-compatible aliases for the legacy hook names. They delegate to
+    # the canonical names above so user overrides of either form still fire.
     def on_optimizer_step(
         self,
         epoch: int,
@@ -267,7 +328,7 @@ class Model(nn.Layer):
         optimizer_closure: Any = None,
     ) -> None:
         """Override to customize optimizer step."""
-        optimizer.step()
+        self.optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
 
     def optimizer_clear_grad(
         self,
@@ -275,15 +336,22 @@ class Model(nn.Layer):
         batch_idx: int,
         optimizer: paddle.optimizer.Optimizer,
     ) -> None:
-        optimizer.clear_grad()
+        self.optimizer_zero_grad(epoch, batch_idx, optimizer)
 
     def lr_scheduler_step(
         self,
         scheduler: Any,
         metric: Any = None,
     ) -> None:
-        """Override to customize LR scheduler step (ocean-compatible)."""
-        scheduler.step()
+        """Override to customize LR scheduler step (ocean-compatible).
+
+        PaddlePaddle's ``ReduceOnPlateau`` takes the monitored metric as a
+        required argument to ``step()``, unlike other schedulers which take none.
+        """
+        if isinstance(scheduler, paddle.optimizer.lr.ReduceOnPlateau):
+            scheduler.step(metric)
+        else:
+            scheduler.step()
 
     def manual_backward(self, loss: paddle.Tensor, *args: Any, **kwargs: Any) -> None:
         """Backward in manual optimization (ocean-compatible)."""
@@ -364,7 +432,7 @@ class Model(nn.Layer):
     ) -> None:
         """Log a dictionary of metrics at once.
 
-        Mirrors paddleOcean's log_dict.
+        Log a dict of scalar metrics in one call.
         """
         for name, value in dictionary.items():
             self.log(
@@ -399,6 +467,22 @@ class Model(nn.Layer):
         else:
             self.set_dict(state_dict)
 
+    def on_save_checkpoint(self) -> dict[str, Any]:
+        """Hook for adding custom state to checkpoint.
+
+        Returns:
+            Dictionary of custom state to include in the checkpoint.
+        """
+        return {}
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Hook for restoring custom state from a checkpoint.
+
+        Receives the full checkpoint dict; the counterpart of
+        :meth:`on_save_checkpoint`. Override to restore any extra state that
+        was added there. The default is a no-op.
+        """
+
     def save_checkpoint(self, path: str) -> None:
         """Save model checkpoint to path.
 
@@ -410,7 +494,7 @@ class Model(nn.Layer):
             state["optimizer"] = self._optimizer.state_dict()
         state["epoch"] = self.current_epoch
         state["dataloader_step"] = self.dataloader_step
-        state["optimizer_step"] = self.optimizer_step
+        state["optimizer_step"] = self._trainer.optimizer_step if self._trainer else 0
         paddle.save(state, path)
 
     def load_checkpoint(
@@ -504,6 +588,31 @@ class Model(nn.Layer):
             return {"loss": total_loss}
         return {"loss": paddle.to_tensor(0.0)}
 
+    def _keras_eval_step(self, batch: Any) -> dict[str, Any]:
+        """Evaluate one batch in Keras mode: forward + (optional) loss/metrics.
+
+        Mirrors the training step's forward path but skips gradient work.
+        Loss/metric names match :meth:`_keras_training_step` so an epoch-end
+        reduction aggregates consistently across fit and evaluate.
+        """
+        if isinstance(batch, (list, tuple)):
+            inputs = batch[0]
+            labels = batch[1] if len(batch) >= 2 else None
+        else:
+            inputs, labels = batch, None
+
+        outputs = self.__model__(inputs)
+        result: dict[str, Any] = {}
+        if self._loss_fns:
+            for i, loss_fn in enumerate(self._loss_fns):
+                lv = loss_fn(outputs, labels) if labels is not None else loss_fn(outputs)
+                self.log(f"val_loss_{i}", lv.item())
+            result["loss"] = sum(
+                (loss_fn(outputs, labels) if labels is not None else loss_fn(outputs)) for loss_fn in self._loss_fns
+            )
+        self._update_metrics(outputs, labels)
+        return result
+
     def _update_metrics(self, outputs: paddle.Tensor, labels: Optional[paddle.Tensor]) -> None:
         for metric in self._metrics:
             if hasattr(metric, "update"):
@@ -514,9 +623,10 @@ class Model(nn.Layer):
         for i, metric in enumerate(self._metrics):
             if hasattr(metric, "accumulate"):
                 val = metric.accumulate()
-                results[self._metrics_name_cache[i + 1 if self._loss_fns else i]] = (
-                    float(val.item()) if hasattr(val, "item") else float(val)
-                )
+                key = self._metrics_name_cache[i + 1 if self._loss_fns else i]
+                if not isinstance(key, str):
+                    key = "_".join(str(k) for k in key) if isinstance(key, (list, tuple)) else str(key)
+                results[key] = float(val.item()) if hasattr(val, "item") else float(val)
             if hasattr(metric, "reset"):
                 metric.reset()
         return results

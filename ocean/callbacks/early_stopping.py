@@ -4,6 +4,7 @@ import math
 from typing import Any, Optional
 
 from ocean.callbacks.callback import Callback
+from ocean.utils import MisconfigurationException
 
 
 class EarlyStopping(Callback):
@@ -37,6 +38,8 @@ class EarlyStopping(Callback):
         divergence_threshold: Optional[float] = None,
         check_on_train_epoch_end: Optional[bool] = None,
     ) -> None:
+        if mode not in self.mode_dict:
+            raise MisconfigurationException(f"`mode` can be {', '.join(self.mode_dict)}, got {mode!r}")
         self.monitor = monitor
         self.min_delta = min_delta
         self.patience = patience
@@ -64,8 +67,8 @@ class EarlyStopping(Callback):
         self._run_early_stopping_check(trainer)
 
     def _should_skip_check(self, trainer: Any) -> bool:
-        """Skip early stopping during sanity checking (ocean-compatible)."""
-        return getattr(trainer, "sanity_checking", False)
+        """Skip early stopping during sanity checking or fast_dev_run."""
+        return getattr(trainer, "sanity_checking", False) or bool(getattr(trainer, "fast_dev_run", False))
 
     def _run_early_stopping_check(self, trainer: Any) -> None:
         logs = trainer._log_metrics_on_epoch
@@ -130,6 +133,10 @@ class EarlyStopping(Callback):
                 trainer.should_stop = True
                 if self.verbose:
                     print(f"EarlyStopping: {self.monitor} did not improve for {self.patience} checks")
+
+    @property
+    def state_key(self) -> str:
+        return self._generate_state_key(monitor=self.monitor, mode=self.mode)
 
     def state_dict(self) -> dict[str, Any]:
         """Return state dict for checkpoint resume (ocean-compatible)."""

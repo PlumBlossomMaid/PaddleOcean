@@ -1,14 +1,19 @@
 """_FitLoop - orchestrates training across epochs.
 
-Uses direct DataLoader iteration to avoid PaddlePaddle shared memory issues.
+Counts epochs and delegates each epoch's batch loop to :class:`_TrainingEpochLoop`.
+The nested structure is the natural fit for this division of labour::
+
+    for epoch in epochs:          # _FitLoop
+        for batch in train_dl:    # _TrainingEpochLoop
+            optimizer step        # _AutomaticOptimization / _ManualOptimization
 """
 
 from typing import Any, Optional
 
-import paddle
-
 from ocean.loops.loop import _Loop
+from ocean.loops.training_epoch_loop import _TrainingEpochLoop
 from ocean.trainer.call import _call_callback_hooks, _call_module_hook
+from ocean.trainer.connectors.logger_connector.result import _ResultCollection
 
 
 class _FitLoop(_Loop):
@@ -18,6 +23,45 @@ class _FitLoop(_Loop):
         super().__init__(trainer)
         self.min_epochs = min_epochs
         self.max_epochs = max_epochs or 1000
+        self.epoch_loop = _TrainingEpochLoop(trainer)
+        # Loader-state pipeline: the combined loader wraps the raw train dataloader
+        # so it can carry and restore per-loader state dicts at checkpoint time.
+        # ``_combined_loader_states_to_load`` is staged by
+        # ``_CheckpointConnector.restore`` and consumed once on the next ``run()``,
+        # only when actually restarting. With plain Paddle loaders these lists stay
+        # empty — the pipeline is a no-op and behaviour is unchanged, but it is the
+        # opt-in point for a loader that chooses to be stateful.
+        self._combined_loader = None
+        self._combined_loader_states_to_load: list = []
+
+    def _setup_combined_loader(self, train_loader: Any) -> None:
+        """Wrap the raw train loader in a CombinedLoader.
+
+        For a single train loader this is the trivial sequential wrapper. The
+        wrapper is what ``_TrainingEpochLoop._is_resumable_loader`` probes for
+        statefulness, so building it up-front keeps that probe valid even before the
+        first epoch runs.
+        """
+        from ocean.utils.combined_loader import CombinedLoader
+
+        self._combined_loader = (
+            train_loader
+            if isinstance(train_loader, CombinedLoader)
+            else CombinedLoader(train_loader, mode="sequential")
+        )
+
+    def _load_combined_loader_states(self) -> None:
+        """Apply staged loader state only when restarting and state was staged.
+
+        A fresh (non-resume) run, or a plain non-stateful loader, fails the guard
+        and nothing is seeded — the epoch runs from batch 0. After the staged list
+        is consumed it is released so it can only be applied once.
+        """
+        states = self._combined_loader_states_to_load
+        if not self.restarting or not states or self._combined_loader is None:
+            return
+        self._combined_loader._load_state_dicts(states)
+        self._combined_loader_states_to_load = []
 
     @property
     def done(self) -> bool:
@@ -28,174 +72,115 @@ class _FitLoop(_Loop):
             return True
         return False
 
+    @property
+    def max_batches(self) -> int:
+        """Number of training batches per epoch (cached once at run() start)."""
+        return self.epoch_loop.max_batches
+
     def run(self) -> None:
         trainer = self.trainer
-        model = trainer._model
         train_loader = getattr(trainer, "train_dataloader", None)
         if train_loader is None:
             return
 
-        # On train start
+        # Cache the limit-adjusted batch count once for the whole run. Using the
+        # resolved limit (not the raw len) makes both int and fractional
+        # limit_train_batches (e.g. 0.5) actually cap training, and drives
+        # num_training_batches.
+        try:
+            effective_train_batches = trainer._resolve_limit(train_loader, trainer.limit_train_batches)
+        except TypeError:
+            effective_train_batches = 0
+        self.epoch_loop._max_batches = effective_train_batches
+
+        # The validation schedule keys off the same limit-adjusted count (so
+        # val_check_interval=1.0 lands on the effective last batch of each epoch).
+        trainer._setup_val_check_batch(effective_train_batches)
+
+        # Mark the running stage so trainer.training and metric fx-keying are
+        # correct during the training loop.
+        trainer.training = True
+
+        # Training metrics accumulate in a dedicated collection for the whole fit.
+        # A mid-epoch validation swaps in its own collection, so it can never clear
+        # the training accumulation gathered earlier in the epoch.
+        trainer._results = _ResultCollection(training=True, fork_names=False)
+
         _call_module_hook(trainer, "on_train_start")
         _call_callback_hooks(trainer, "on_train_start")
 
-        # Log initial state at step 0 (0 % log_every_n_steps == 0)
-        if trainer.log_every_n_steps > 0:
-            trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
-
-        device = trainer._resolve_device()
-
         while not self.done:
-            # On epoch start
+            # Optionally rebuild the training dataloader from the datamodule.
+            self._reload_train_dataloader_if_needed()
+
+            # Wrap the (possibly just-rebuilt) train loader for the combined-loader
+            # pipeline. ``_load_combined_loader_states`` is a guarded no-op except on
+            # the restarting epoch where staged restore state is applied once; on a
+            # reload epoch the wrapper switches to the fresh loader and nothing is
+            # reseeded, matching how a plain non-stateful loader re-yields from 0.
+            self._setup_combined_loader(trainer.train_dataloader)
+            self._load_combined_loader_states()
+
+            # Fresh accumulation each epoch (weighted means are per-epoch).
+            trainer._results = _ResultCollection(training=True, fork_names=False)
+
             _call_module_hook(trainer, "on_train_epoch_start")
             _call_callback_hooks(trainer, "on_train_epoch_start")
 
-            # Reset optimizer accumulation
-            opt_acc = 0
+            self.epoch_loop.run()
 
-            for batch_idx, batch in enumerate(train_loader):
-                if trainer._should_limit_batches(batch_idx, "train"):
-                    break
-
-                batch = trainer._move_to_device(batch, device)
-
-                _call_callback_hooks(trainer, "on_train_batch_start", batch, batch_idx)
-                skip = model.on_train_batch_start(batch, batch_idx)
-                if skip == -1:
-                    continue
-
-                # Training step
-                result = model.training_step(batch, batch_idx)
-
-                # Periodic logger flush — use current step (before increment)
-                # so step 0 (0 % N == 0) triggers correctly and the interval
-                # matches the config value.
-                if trainer.dataloader_step % max(1, trainer.log_every_n_steps) == 0:
-                    trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
-
-                # Skip automatic backward/optimizer when manual optimization is used
-                # (model handles backward and step inside training_step)
-                if model.automatic_optimization:
-                    loss = (
-                        result["loss"]
-                        if isinstance(result, dict)
-                        else (result if isinstance(result, paddle.Tensor) else None)
-                    )
-
-                    if loss is not None:
-                        model.on_before_backward(loss)
-                        _call_callback_hooks(trainer, "on_before_backward", loss)
-                        loss = loss / max(1, trainer.accumulate_grad_batches)
-                        loss.backward()
-                        model.on_after_backward()
-                        _call_callback_hooks(trainer, "on_after_backward")
-                        opt_acc += 1
-
-                        if opt_acc >= trainer.accumulate_grad_batches:
-                            if trainer.gradient_clip_val is not None and trainer.gradient_clip_val > 0:
-                                if trainer.gradient_clip_algorithm == "norm":
-                                    paddle.nn.utils.clip_grad_norm_(model.parameters(), trainer.gradient_clip_val)
-                                elif trainer.gradient_clip_algorithm == "value":
-                                    paddle.nn.utils.clip_grad_value_(model.parameters(), trainer.gradient_clip_val)
-                            model.on_before_optimizer_step(trainer._optimizer)
-                            _call_callback_hooks(trainer, "on_before_optimizer_step", trainer._optimizer)
-                            trainer._optimizers[0].step()
-                            # optimizer_step auto-incremented by
-                            # OceanOptimizer._on_after_step hook
-                            model.on_before_zero_grad(trainer._optimizer)
-                            _call_callback_hooks(trainer, "on_before_zero_grad", trainer._optimizer)
-                            trainer._optimizers[0].clear_grad()
-                            opt_acc = 0
-                            trainer._dataloader_step += 1
-                else:
-                    # Manual optimization: model handles backward/step inside training_step.
-                    # Track batch count for max_steps, logger flush and optimizer steps.
-                    trainer._dataloader_step += 1
-                    trainer._optimizer_step += 1
-
-                model.on_train_batch_end(result, batch, batch_idx)
-                _call_callback_hooks(trainer, "on_train_batch_end", result, batch, batch_idx)
-
-                # Step-based validation check (ocean-compatible)
-                if trainer._should_check_val_step(trainer.dataloader_step):
-                    self._run_validation()
-
-                if 0 < trainer.max_steps <= trainer.dataloader_step:
-                    trainer.should_stop = True
-                    break
-
-            # Flush remaining gradients
-            if opt_acc > 0 and trainer._optimizer is not None:
-                if trainer.gradient_clip_val is not None and trainer.gradient_clip_val > 0:
-                    if trainer.gradient_clip_algorithm == "norm":
-                        paddle.nn.utils.clip_grad_norm_(model.parameters(), trainer.gradient_clip_val)
-                    elif trainer.gradient_clip_algorithm == "value":
-                        paddle.nn.utils.clip_grad_value_(model.parameters(), trainer.gradient_clip_val)
-                model.on_before_optimizer_step(trainer._optimizer)
-                _call_callback_hooks(trainer, "on_before_optimizer_step", trainer._optimizer)
-                trainer._optimizer.step()
-                model.on_before_zero_grad(trainer._optimizer)
-                _call_callback_hooks(trainer, "on_before_zero_grad", trainer._optimizer)
-                trainer._optimizer.clear_grad()
-                trainer._dataloader_step += 1
-                trainer._optimizer_step += 1
-
-            # On epoch end
             trainer._compute_epoch_metrics()
             _call_module_hook(trainer, "on_train_epoch_end")
             _call_callback_hooks(trainer, "on_train_epoch_end")
 
+            # Step epoch-interval LR schedulers at epoch end.
+            self.epoch_loop._update_lr_schedulers("epoch")
+
             trainer.current_epoch += 1
 
-            # Validation
-            if trainer._should_check_val():
-                self._run_validation()
+            # Restart handling complete — clear the flag (cascades to child loops).
+            self.restarting = False
 
             if trainer._should_stop():
                 break
 
-        # On train end
         _call_module_hook(trainer, "on_train_end")
         _call_callback_hooks(trainer, "on_train_end")
 
-    def teardown(self) -> None:
-        pass
+    def _reload_train_dataloader_if_needed(self) -> None:
+        """Rebuild the training dataloader every ``reload_dataloaders_every_n_epochs``.
 
-    def _run_validation(self) -> None:
+        Only possible when a datamodule is attached (a raw dataloader has no source
+        to reload from). Re-runs ``setup('fit')`` so datasets can change per epoch,
+        then re-caches the effective batch count.
+        """
         trainer = self.trainer
-        model = trainer._model
-        val_loader = getattr(trainer, "val_dataloaders", None)
-        if not val_loader:
+        n = getattr(trainer, "reload_dataloaders_every_n_epochs", 0)
+        datamodule = getattr(trainer, "datamodule", None)
+        if not n or datamodule is None:
+            return
+        if trainer.current_epoch == 0 or trainer.current_epoch % n != 0:
             return
 
-        model.on_validation_model_eval()
-        _call_module_hook(trainer, "on_validation_start")
-        _call_callback_hooks(trainer, "on_validation_start")
-        _call_module_hook(trainer, "on_validation_epoch_start")
-        _call_callback_hooks(trainer, "on_validation_epoch_start")
+        datamodule.setup("fit")
+        trainer.train_dataloader = datamodule.train_dataloader()
+        try:
+            self.epoch_loop._max_batches = trainer._resolve_limit(trainer.train_dataloader, trainer.limit_train_batches)
+        except TypeError:
+            self.epoch_loop._max_batches = 0
 
-        device = trainer._resolve_device()
-        for dataloader in val_loader if isinstance(val_loader, (list, tuple)) else [val_loader]:
-            with paddle.no_grad():
-                for batch_idx, batch in enumerate(dataloader):
-                    if trainer._should_limit_batches(batch_idx, "val"):
-                        break
-                    batch = trainer._move_to_device(batch, device)
-                    _call_callback_hooks(trainer, "on_validation_batch_start", batch, batch_idx, dataloader_idx=0)
-                    model.on_validation_batch_start(batch, batch_idx)
-                    result = model.validation_step(batch, batch_idx)
-                    model.on_validation_batch_end(result, batch, batch_idx)
-                    _call_callback_hooks(trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0)
+    def teardown(self) -> None:
+        self.epoch_loop.teardown()
 
-        trainer._compute_epoch_metrics()
-        # Flush validation metrics to logger (VisualDL/TensorBoard) immediately
-        # so val/* tags appear in VDL (Lightning: eval loop calls log_metrics internally)
-        trainer._logger_connector.log_metrics(trainer.logged_metrics, trainer.dataloader_step)
-        _call_module_hook(trainer, "on_validation_epoch_end")
-        _call_callback_hooks(trainer, "on_validation_epoch_end")
-        _call_module_hook(trainer, "on_validation_end")
-        _call_callback_hooks(trainer, "on_validation_end")
-        # Clear val/test metrics so they don't leak into training log flushes
-        # (Lightning separates val/train metric collections; ocean shares _logged_metrics)
-        trainer._logger_connector.reset_validation_metrics()
-        model.on_validation_model_train()
+    def load_state_dict(self, state_dict: dict) -> None:
+        # Legacy checkpoints stored ``batch_progress`` directly on the fit loop,
+        # before the batch loop moved into the epoch loop. Route it to its new home.
+        if "batch_progress" in state_dict and "epoch_loop" not in state_dict:
+            self.epoch_loop.batch_progress.load_state_dict(state_dict["batch_progress"])
+            # Use the property setter so the restart flag cascades to child loops
+            # (matches what super().load_state_dict does after the loop.py fix).
+            self.restarting = True
+            self._resuming_from_checkpoint = True
+            self.epoch_loop._resuming_from_checkpoint = True
+            return
+        super().load_state_dict(state_dict)

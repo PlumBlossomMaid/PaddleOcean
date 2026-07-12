@@ -1,10 +1,15 @@
-"""CSVLogger - logs metrics to CSV files."""
+"""CSVLogger - logs metrics to CSV files.
+
+Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
+only rank 0 writes CSV files.
+"""
 
 import csv
 import os
 from typing import Optional
 
 from ocean.loggers.base import Logger
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
 
 
 class CSVLogger(Logger):
@@ -57,11 +62,13 @@ class CSVLogger(Logger):
         return os.path.join(self._root_dir, self._name, f"version_{self.version}")
 
     @property
+    @rank_zero_experiment
     def experiment(self) -> "_ExperimentWriter":
         if self._experiment is None:
             self._experiment = _ExperimentWriter(self.log_dir)
         return self._experiment
 
+    @rank_zero_only
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
         if step is None:
             step = len(self._metrics)
@@ -78,9 +85,11 @@ class CSVLogger(Logger):
         if len(self._metrics) % self._flush_logs_every_n_steps == 0:
             self.save()
 
+    @rank_zero_only
     def save(self) -> None:
         self.experiment.save()
 
+    @rank_zero_only
     def finalize(self, status: str) -> None:
         self.save()
 
@@ -122,7 +131,11 @@ class _ExperimentWriter:
 
         file_exists = os.path.exists(self.metrics_file)
         with open(self.metrics_file, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["step"] + [k for k in self.metrics_keys if k != "step"])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["step"] + [k for k in self.metrics_keys if k != "step"],
+                extrasaction="ignore",
+            )
             if not file_exists:
                 writer.writeheader()
             for m in self.metrics:

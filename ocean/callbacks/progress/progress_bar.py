@@ -38,10 +38,17 @@ class ProgressBar(Callback):
 
 
 class TQDMProgressBar(ProgressBar):
-    """Progress bar using ColoredTqdm (rainbow)."""
+    """Progress bar using ColoredTqdm (rainbow).
 
-    def __init__(self) -> None:
+    Args:
+        process_position: Offset for progress bar position. Set to a value
+            greater than 0 to offset by this many lines. Useful when other
+            progress bars are defined elsewhere and you want them stacked.
+    """
+
+    def __init__(self, process_position: int = 0) -> None:
         super().__init__()
+        self.process_position = process_position
         self._train_tqdm = None
         self._val_tqdm = None
         self._test_tqdm = None
@@ -51,22 +58,22 @@ class TQDMProgressBar(ProgressBar):
     def _get_total(trainer: Any, stage: str) -> Optional[int]:
         """Get total number of batches for a stage."""
         if stage == "train":
-            dl = getattr(trainer, "train_dataloader", None)
-            if dl is not None:
-                try:
-                    return len(dl)
-                except TypeError:
-                    pass
-            max_steps = getattr(trainer, "max_steps", None)
-            if max_steps and max_steps > 0:
-                return max_steps
+            return trainer.num_training_batches or None
         elif stage in ("val", "sanity"):
             dls = getattr(trainer, "val_dataloaders", None)
             if dls:
                 try:
-                    return sum(len(dl) for dl in dls if hasattr(dl, "__len__"))
+                    total = sum(len(dl) for dl in dls if hasattr(dl, "__len__"))
                 except TypeError:
-                    pass
+                    total = None
+                # Apply limit_val_batches
+                limit = getattr(trainer, "limit_val_batches", None)
+                if limit is not None and total is not None:
+                    if isinstance(limit, float) and 0 < limit <= 1.0:
+                        total = int(total * limit)
+                    elif isinstance(limit, int) and limit > 0:
+                        total = min(total, limit)
+                return total
         elif stage == "test":
             dls = getattr(trainer, "test_dataloaders", None)
             if dls:
@@ -85,22 +92,17 @@ class TQDMProgressBar(ProgressBar):
 
     @staticmethod
     def get_metrics(trainer: Any, model: Any) -> dict[str, Any]:
-        """Get metrics for progress bar display.
+        """Get metrics for progress bar display. Raw values.
 
-        Only shows metrics logged with prog_bar=True (DiffSinger-compatible).
-        Formats floats with smart precision.
+        Only shows metrics logged with prog_bar=True.
+        tqdm handles formatting natively — ints stay ints, floats are auto-formatted.
         """
         items = dict(trainer.progress_bar_metrics)
+        if "steps" not in items:
+            items["steps"] = trainer.dataloader_step
         for k, v in list(items.items()):
-            if isinstance(v, float):
-                if np.isnan(v):
-                    items[k] = "nan"
-                elif 0.001 <= abs(v) < 10:
-                    items[k] = f"{v:.4f}"
-                elif abs(v) < 0.001:
-                    items[k] = f"{v:.4e}"
-                else:
-                    items[k] = f"{v:.2f}"
+            if isinstance(v, float) and np.isnan(v):
+                items[k] = "nan"
         return items
 
     def on_train_epoch_start(self, trainer: Any, model: Any) -> None:
@@ -110,19 +112,24 @@ class TQDMProgressBar(ProgressBar):
             total = self._get_total(trainer, "train")
             self._train_tqdm = tqdm(
                 total=total,
+                initial=0,
                 desc=f"Epoch {trainer.current_epoch}",
                 leave=True,
                 unit="it",
+                position=self.process_position,
             )
         except ImportError:
             self._train_tqdm = None
 
     def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self._train_tqdm is not None:
-            self._train_tqdm.update(1)
+            n = batch_idx + 1
+            if not self._train_tqdm.disable:
+                self._train_tqdm.n = n
+                self._train_tqdm.refresh()
             metrics = self.get_metrics(trainer, model)
             if metrics:
-                self._train_tqdm.set_postfix(**metrics, refresh=False)
+                self._train_tqdm.set_postfix(**metrics)
 
     def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
         if self._train_tqdm is not None:
@@ -146,6 +153,7 @@ class TQDMProgressBar(ProgressBar):
                 desc="Validation" if trainer.dataloader_step > 0 else "Sanity Check",
                 leave=False,
                 unit="it",
+                position=self.process_position + 1,
             )
         except ImportError:
             self._val_tqdm = None
@@ -160,6 +168,12 @@ class TQDMProgressBar(ProgressBar):
         if self._val_tqdm is not None:
             self._val_tqdm.close()
             self._val_tqdm = None
+        # Refresh training bar postfix with latest metrics
+        if self._train_tqdm is not None and not self._train_tqdm.disable:
+            metrics = self.get_metrics(trainer, model)
+            if metrics:
+                self._train_tqdm.set_postfix(**metrics)
+                self._train_tqdm.refresh()
 
     # ── Test progress ──
 

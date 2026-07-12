@@ -26,8 +26,9 @@ def load_from_checkpoint(
     """
     checkpoint = paddle.load(checkpoint_path)
 
-    # Extract hparams from checkpoint
-    hparams = checkpoint.get("hyper_parameters", {})
+    # Extract hparams from checkpoint (canonical "hyper_parameters" key, with
+    # backward-compatible fallback to the legacy "hparams" key).
+    hparams = checkpoint.get("hyper_parameters", checkpoint.get("hparams", {}))
 
     # Override with kwargs
     if kwargs:

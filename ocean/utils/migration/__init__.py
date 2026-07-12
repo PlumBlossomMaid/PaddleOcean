@@ -1,4 +1,4 @@
-"""Checkpoint migration utilities - upgrade checkpoints between paddleOcean versions."""
+"""Checkpoint migration utilities - upgrade checkpoints between ocean versions."""
 
 from typing import Any, Optional
 

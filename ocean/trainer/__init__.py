@@ -1,9 +1,23 @@
 """ocean.Trainer - complete training loop engine with connectors, loops, callbacks, loggers."""
 
-from collections import defaultdict
+import time
+from datetime import timedelta
 from typing import Any, Optional, Union
 
 import paddle
+
+try:
+    from paddlemetrics import Metric as PaddleMetric
+    from paddlemetrics.metric import _squeeze_if_scalar as _pm_squeeze
+
+    _HAS_PADDLEMETRICS = True
+except ImportError:
+    PaddleMetric = type(None)  # placeholder, never matches isinstance
+
+    def _pm_squeeze(x):
+        return x
+
+    _HAS_PADDLEMETRICS = False
 
 from ocean.strategies import SingleDeviceStrategy
 from ocean.trainer.call import (
@@ -21,7 +35,30 @@ from ocean.trainer.connectors import (
     _LoggerConnector,
     _SignalConnector,
 )
+from ocean.trainer.connectors.logger_connector import _ResultCollection
 from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerStatus
+
+
+def _patch_ddp_attr_forward(ddp_model: paddle.nn.Layer) -> None:
+    """Patch a ``paddle.distributed.DataParallel`` instance so that unknown
+    attribute accesses are forwarded to the underlying ``_layers`` module.
+
+    PaddlePaddle's ``DataParallel`` does **not** forward custom attributes
+    like ``training_step``, ``on_train_batch_start``. This patch makes ocean
+    training loops work transparently with DDP.
+    """
+    original_class = type(ddp_model)
+
+    class _DDPProxy(original_class):  # type: ignore[misc]
+        """DataParallel subclass that forwards unknown attrs to _layers."""
+
+        def __getattr__(self, name: str) -> Any:
+            try:
+                return super().__getattr__(name)
+            except AttributeError:
+                return getattr(self._layers, name)
+
+    ddp_model.__class__ = _DDPProxy
 
 
 class Trainer:
@@ -134,6 +171,12 @@ class Trainer:
         self.limit_predict_batches = limit_predict_batches
         self.val_check_interval = val_check_interval
         self.check_val_every_n_epoch = check_val_every_n_epoch
+        # Resolved once per fit run by _setup_val_check_batch(): either a batch
+        # count (int) or, for time-based intervals, seconds in _val_check_time_interval.
+        self.val_check_batch: Optional[int] = None
+        self._val_check_max_batches: int = 0
+        self._val_check_time_interval: Optional[float] = None
+        self._last_val_time: float = 0.0
         self.accumulate_grad_batches = accumulate_grad_batches
         self.gradient_clip_val = gradient_clip_val
         self.gradient_clip_algorithm = gradient_clip_algorithm
@@ -162,8 +205,8 @@ class Trainer:
         self.current_epoch: int = 0
         self._dataloader_step: int = 0
         self._optimizer_step: int = 0
-        self._optimizers: list = []
-        self._optimizer: Any = None  # kept for backward compat
+        self.optimizers: list = []
+        self._lr_schedulers: list = []
         self.should_stop: bool = False
 
         # === Model & Data ===
@@ -223,7 +266,10 @@ class Trainer:
         self.strategy = self._accelerator_connector.strategy
 
         # === Metrics ===
-        self._log_metrics_buffer: dict[str, list[float]] = defaultdict(list)
+        # Per-stage metric storage. The active collection is swapped by the loops
+        # (training=True for the fit loop, training=False for eval), which is what
+        # keeps a mid-epoch validation pass from clobbering training accumulation.
+        self._results: Optional[_ResultCollection] = None
         self._log_metrics_on_epoch: dict[str, float] = {}
 
     # ====================================================================
@@ -299,8 +345,53 @@ class Trainer:
         return self._optimizer_step
 
     @property
+    def num_training_batches(self) -> int:
+        """Total training batches per epoch (from fit_loop)."""
+        return self.fit_loop.max_batches
+
+    @property
     def is_global_zero(self) -> bool:
-        return True
+        """Whether this process is global rank 0.
+
+        Delegates to ``self.strategy.is_global_zero`` in distributed mode,
+        so only the main process reports True.
+        """
+        return self.strategy.is_global_zero if hasattr(self, "strategy") else True
+
+    @staticmethod
+    def spawn(
+        fn: Any,
+        nprocs: int = 4,
+        accelerator: str = "gpu",
+        precision: str = "32",
+        **spawn_kwargs: Any,
+    ) -> Any:
+        """Launch a training function across multiple processes via ``paddle.distributed.spawn``.
+
+        This enables DDP-style spawning with the chosen strategy.  Each
+        subprocess receives ``fn(rank, *args)`` and should create its own
+        model and trainer inside.
+
+        Usage::
+
+            def train_fn(rank, model_cls, data_fn):
+                model = model_cls()
+                trainer = ocean.Trainer(accelerator="gpu", strategy="ddp", devices=4)
+                trainer.fit(model, data_fn())
+
+            ocean.Trainer.spawn(train_fn, nprocs=4, args=(MyModel, make_data))
+
+        Args:
+            fn: Training function ``fn(rank, *args)`` called in each process.
+            nprocs: Number of processes to spawn.
+            accelerator: Accelerator type (default ``"gpu"``).
+            precision: Training precision.
+            **spawn_kwargs: Additional kwargs passed to ``paddle.distributed.spawn``.
+
+        Returns:
+            The ``MultiprocessContext`` from ``paddle.distributed.spawn``.
+        """
+        return paddle.distributed.spawn(fn, nprocs=nprocs, **spawn_kwargs)
 
     # ====================================================================
     # Fit
@@ -316,10 +407,63 @@ class Trainer:
     ) -> None:
         self.state.fn = TrainerFn.FITTING
         self.state.status = TrainerStatus.RUNNING
+
+        # Auto-spawn for ddp_spawn strategy
+        if self.strategy_flag == "ddp_spawn" and len(getattr(self.strategy, "parallel_devices", [])) > 1:
+            nprocs = len(self.strategy.parallel_devices)
+            spawn_kwargs = self._spawn_trainer_kwargs(nprocs)
+
+            def _spawned_fit(rank: int) -> None:
+                """Recreate Trainer + model in each subprocess and run fit."""
+                trainer = Trainer(**spawn_kwargs)
+                model._trainer = trainer
+                trainer.fit(model, train_dataloaders, val_dataloaders, datamodule, ckpt_path)
+
+            return paddle.distributed.spawn(_spawned_fit, nprocs=nprocs)
+
         _call_and_handle_interrupt(
             self, self._fit_impl, model, train_dataloaders, val_dataloaders, datamodule, ckpt_path
         )
         self.state.status = TrainerStatus.FINISHED
+
+    def _spawn_trainer_kwargs(self, nprocs: int) -> dict:
+        """Build the Trainer kwargs for a ddp_spawn subprocess.
+
+        Forwards the full training configuration so spawned processes don't
+        silently fall back to defaults for limits, clipping, accumulation,
+        validation scheduling, etc.
+        """
+        from ocean.callbacks.checkpoint import ModelCheckpoint
+        from ocean.callbacks.progress import ProgressBar
+
+        callbacks = getattr(self, "callbacks", None) or []
+        return {
+            "accelerator": self.accelerator_flag,
+            "strategy": "ddp",
+            "devices": nprocs,
+            "precision": self.precision_flag,
+            "max_epochs": self.max_epochs,
+            "min_epochs": self.min_epochs,
+            "max_steps": self.max_steps,
+            "limit_train_batches": self.limit_train_batches,
+            "limit_val_batches": self.limit_val_batches,
+            "limit_test_batches": self.limit_test_batches,
+            "limit_predict_batches": self.limit_predict_batches,
+            "val_check_interval": self.val_check_interval,
+            "check_val_every_n_epoch": self.check_val_every_n_epoch,
+            "gradient_clip_val": self.gradient_clip_val,
+            "gradient_clip_algorithm": self.gradient_clip_algorithm,
+            "accumulate_grad_batches": self.accumulate_grad_batches,
+            "num_sanity_val_steps": self.num_sanity_val_steps,
+            "reload_dataloaders_every_n_epochs": self.reload_dataloaders_every_n_epochs,
+            "detect_anomaly": self.detect_anomaly,
+            "log_every_n_steps": self.log_every_n_steps,
+            "enable_progress_bar": any(isinstance(cb, ProgressBar) for cb in callbacks),
+            "enable_checkpointing": any(isinstance(cb, ModelCheckpoint) for cb in callbacks),
+            "logger": self.loggers,
+            "default_root_dir": self.default_root_dir or ".",
+            "verbose": self.verbose,
+        }
 
     def _fit_impl(
         self,
@@ -359,25 +503,54 @@ class Trainer:
         device = self._resolve_device()
         model.to(device)
 
+        # DDP wrapping (if applicable)
+        from ocean.strategies.ddp import DDPStrategy
+
+        if isinstance(self.strategy, DDPStrategy) and self.strategy._is_initialized:
+            # Paddle's DataParallel does not forward custom attributes like
+            # ``training_step``, ``validation_step``, etc.  We patch the wrapper
+            # class to forward unknown attribute access to ``_layers`` so that
+            # hooks and step methods are transparently available on the DDP model.
+            ddp_model = paddle.distributed.DataParallel(
+                self._model,
+                find_unused_parameters=self.strategy._find_unused_parameters,
+            )
+            _patch_ddp_attr_forward(ddp_model)
+            self._model = ddp_model
+            self._original_model = model
+        else:
+            self._original_model = None
+
         # Optimizer & Strategy setup
-        self._optimizers = self._resolve_optimizers(model)
-        if self._optimizers:
-            self.strategy._optimizers = [o._optimizer for o in self._optimizers]
-            # Set up auto-increment for optimizer steps
-            for o in self._optimizers:
+        self.optimizers = self._resolve_optimizers(model)
+        if self.optimizers:
+            self.strategy._optimizers = [o._optimizer for o in self.optimizers]
+            for o in self.optimizers:
                 o._on_after_step = lambda: self._advance_optimizer_step()
-            self._optimizer = self._optimizers[0]._optimizer  # backward compat
+
+        # Attach model callbacks BEFORE restoring, so a checkpoint's callback
+        # state is applied to model-defined callbacks (from configure_callbacks())
+        # too — otherwise they are not yet in trainer.callbacks at restore time.
+        self._callback_connector._attach_model_callbacks()
 
         # Checkpoint restore
         if ckpt_path is not None:
             self._checkpoint_connector.restore(ckpt_path)
 
-        # Attach model callbacks
-        self._callback_connector._attach_model_callbacks()
-
         # Fit start hooks
         _call_module_hook(self, "on_fit_start")
         _call_callback_hooks(self, "on_fit_start")
+
+        # Log hyperparameters once near the start of fit so every backend
+        # records them (Wandb config, MLflow params, ...). Gated by
+        # enable_autolog_hparams; callbacks/strategy are already attached.
+        if self.enable_autolog_hparams:
+            hparams = getattr(self._model, "hparams", None)
+            if hparams:
+                self._logger_connector.log_hyperparams(dict(hparams))
+
+        # Install SIGTERM handler for graceful shutdown (restored in _teardown).
+        self._signal_connector.register_signal_handlers()
 
         # Sanity check
         if self.val_dataloaders and self.num_sanity_val_steps > 0:
@@ -389,6 +562,9 @@ class Trainer:
         # Fit end hooks
         _call_module_hook(self, "on_fit_end")
         _call_callback_hooks(self, "on_fit_end")
+
+        # Signal clean completion so each backend closes its run/writer.
+        self._logger_connector.finalize("success")
         self._teardown()
 
     def _advance_optimizer_step(self) -> None:
@@ -411,7 +587,8 @@ class Trainer:
 
         if datamodule is not None:
             datamodule.trainer = self
-            datamodule.prepare_data()
+            self.datamodule = datamodule
+            self._data_connector.prepare_data()
             datamodule.setup("validate")
             dataloaders = [datamodule.val_dataloader()]
 
@@ -421,7 +598,7 @@ class Trainer:
         device = self._resolve_device()
         self._model.to(device)
 
-        self._log_metrics_buffer.clear()
+        self._results = _ResultCollection(training=False, fork_names=False)
         self._log_metrics_on_epoch.clear()
         self.validate_loop.verbose = verbose
         return self.validate_loop.run()
@@ -439,7 +616,8 @@ class Trainer:
 
         if datamodule is not None:
             datamodule.trainer = self
-            datamodule.prepare_data()
+            self.datamodule = datamodule
+            self._data_connector.prepare_data()
             datamodule.setup("test")
             dataloaders = [datamodule.test_dataloader()]
 
@@ -449,7 +627,7 @@ class Trainer:
         device = self._resolve_device()
         self._model.to(device)
 
-        self._log_metrics_buffer.clear()
+        self._results = _ResultCollection(training=False, fork_names=False)
         self._log_metrics_on_epoch.clear()
         return self.test_loop.run()
 
@@ -466,7 +644,8 @@ class Trainer:
 
         if datamodule is not None:
             datamodule.trainer = self
-            datamodule.prepare_data()
+            self.datamodule = datamodule
+            self._data_connector.prepare_data()
             datamodule.setup("predict")
             dataloaders = [datamodule.predict_dataloader()]
 
@@ -509,41 +688,87 @@ class Trainer:
         rank_zero_only: bool = False,
         metric_attribute: Optional[str] = None,
     ) -> None:
-        if hasattr(value, "item"):
-            value = value.item()
+        """Log a scalar / tensor / ``paddlemetrics.Metric`` value.
 
-        # Handle sync_dist: reduce across processes
-        if sync_dist and hasattr(self.strategy, "reduce"):
-            try:
-                import paddle
+        Routes into the active per-stage ``_ResultCollection`` (``self._results``),
+        which owns reduction (batch-size-weighted mean, or min/max/sum) and keeps
+        training and evaluation metrics in separate collections so a mid-epoch
+        validation pass cannot clobber training accumulation.
+        """
+        results = self._results
+        if results is None:
+            # Logging outside a loop-managed stage — default to a training
+            # collection so values are not lost.
+            results = self._results = _ResultCollection(training=True, fork_names=False)
 
-                value = self.strategy.reduce(paddle.to_tensor(value), reduce_op="mean", group=sync_dist_group)
-                if hasattr(value, "item"):
-                    value = value.item()
-            except Exception as e:
-                import warnings
+        is_metric_obj = _HAS_PADDLEMETRICS and isinstance(value, PaddleMetric)
 
-                warnings.warn(f"sync_dist reduce failed: {e}")
+        if not is_metric_obj:
+            if hasattr(value, "item"):
+                value = value.item()
 
-        # Handle rank_zero_only: skip logging on non-zero ranks
-        if rank_zero_only and not self.is_global_zero:
-            return
+            # sync_dist: reduce across processes before accumulation
+            if sync_dist and hasattr(self.strategy, "reduce"):
+                try:
+                    value = self.strategy.reduce(paddle.to_tensor(value), reduce_op="mean", group=sync_dist_group)
+                    if hasattr(value, "item"):
+                        value = value.item()
+                except Exception as e:
+                    import warnings
 
-        # Respect on_step/on_epoch flags (ocean-compatible)
+                    warnings.warn(f"sync_dist reduce failed: {e}")
+
+            # rank_zero_only: skip logging on non-zero ranks
+            if rank_zero_only and not self.is_global_zero:
+                return
+
+        # Defaults keep ocean's bare-name, epoch-mean-available behavior.
         step_log = on_step if on_step is not None else True
         epoch_log = on_epoch if on_epoch is not None else True
 
-        if epoch_log:
-            self._log_metrics_buffer[name].append(value)
-        if step_log:
-            self._logger_connector.log_metric_value(name, float(value), prog_bar=prog_bar)
+        results.log(
+            self._current_fx(),
+            name,
+            value,
+            prog_bar=prog_bar,
+            logger=logger,
+            on_step=step_log,
+            on_epoch=epoch_log,
+            reduce_fx=reduce_fx,
+            add_dataloader_idx=add_dataloader_idx,
+            batch_size=batch_size,
+            is_tensor=not is_metric_obj,
+        )
+        # Refresh snapshot dicts so mid-step callback / progress-bar reads see it.
+        self._logger_connector.update_metrics(on_step=True)
+
+    def _current_fx(self) -> str:
+        """Name of the current step function, used to key metric storage."""
+        stage = self.state.stage
+        if stage in (RunningStage.VALIDATING, RunningStage.SANITY_CHECKING):
+            return "validation_step"
+        if stage == RunningStage.TESTING:
+            return "test_step"
+        if stage == RunningStage.PREDICTING:
+            return "predict_step"
+        return "training_step"
 
     def _compute_epoch_metrics(self) -> None:
-        """Reduce buffered metrics into epoch-level values."""
-        for name, values in self._log_metrics_buffer.items():
-            if values:
-                self._log_metrics_on_epoch[name] = float(sum(values)) / len(values)
-        self._log_metrics_buffer.clear()
+        """Reduce the active collection's metrics into epoch-level values.
+
+        Pulls the epoch view from ``self._results`` (batch-size-weighted mean /
+        min / max / sum, plus ``paddlemetrics.Metric.compute()``) into the epoch
+        snapshot and the logger connector's metric dicts. Never touches any other
+        stage's collection.
+        """
+        results = self._results
+        if results is None:
+            return
+        m = results.metrics(on_step=False)
+        self._log_metrics_on_epoch.update(m["log"])
+        self._logger_connector._logged_metrics.update(m["log"])
+        self._logger_connector._callback_metrics.update(m["callback"])
+        self._logger_connector._progress_bar_metrics.update(m["pbar"])
 
     # ====================================================================
     # Internal utilities
@@ -552,8 +777,16 @@ class Trainer:
     def _resolve_device(self) -> Any:
         """Resolve device consistent with _AcceleratorConnector auto-detection.
 
-        ocean-compatible: auto mode checks CUDA availability.
+        In DDP mode, delegates to ``self.strategy.root_device`` so each
+        process uses its assigned device (e.g. GPU:0, GPU:1, ...).
         """
+        # DDP: each process uses its own device from the strategy
+        if hasattr(self, "strategy") and self.strategy is not None:
+            try:
+                return self.strategy.root_device
+            except Exception:
+                pass
+
         if self.accelerator_flag == "auto":
             if paddle.is_compiled_with_cuda():
                 return paddle.CUDAPlace(0)
@@ -572,7 +805,8 @@ class Trainer:
 
         if model._optimizer is not None:
             return [OceanOptimizer(model._optimizer)]
-        opts, _ = init_optimizers_and_lr_schedulers(model)
+        opts, lr_schedulers = init_optimizers_and_lr_schedulers(model)
+        self._lr_schedulers = lr_schedulers
         return [OceanOptimizer(opt) for opt in opts]
 
     def _move_to_device(self, batch: Any, device: Any) -> Any:
@@ -594,24 +828,88 @@ class Trainer:
         return min(int(total * limit), total)
 
     def _print(self, msg: str) -> None:
-        """Print a message to console if verbose."""
-        if self.verbose > 0:
+        """Print a message to console only on rank 0."""
+        if self.verbose > 0 and self.is_global_zero:
             print(msg)
 
-    def _should_check_val(self) -> bool:
-        if self.check_val_every_n_epoch is None:
-            return False
-        return self.current_epoch % self.check_val_every_n_epoch == 0
+    def _setup_val_check_batch(self, max_batches: int) -> None:
+        """Resolve ``val_check_interval`` into a concrete schedule for this fit run.
 
-    def _should_check_val_step(self, step: int) -> bool:
-        """Check if validation should run at this training step (ocean-compatible).
+        Resolution order:
+        - ``int``   → validate every N training batches (must be <= max_batches
+          unless ``check_val_every_n_epoch is None``, i.e. batches span epochs).
+        - ``float`` → fraction of an epoch; validate every
+          ``int(max_batches * interval)`` batches (``1.0`` → once at epoch end).
+        - time-based (``str`` ``"DD:HH:MM:SS"`` / ``timedelta`` / ``dict``) → validate
+          when that much wall-clock time has elapsed since the last validation.
 
-        Only triggered when val_check_interval is an int (every N steps).
+        ``max_batches`` must already account for ``limit_train_batches``.
         """
-        val_interval = self.val_check_interval
-        if not isinstance(val_interval, int) or val_interval <= 0:
+        self._val_check_max_batches = max_batches
+        self._val_check_time_interval = None
+        self.val_check_batch = None
+
+        interval = self.val_check_interval
+
+        if isinstance(interval, (str, timedelta, dict)):
+            from ocean.callbacks.timer import _parse_duration
+
+            self._val_check_time_interval = _parse_duration(interval)
+            self._last_val_time = time.monotonic()
+            return
+
+        if max_batches == 0:
+            self.val_check_batch = 0
+            return
+
+        if isinstance(interval, int):
+            if interval <= 0:
+                self.val_check_batch = 0
+                return
+            if interval > max_batches and self.check_val_every_n_epoch is not None:
+                raise ValueError(
+                    f"`val_check_interval` ({interval}) must be <= the number of training "
+                    f"batches ({max_batches}). To validate based on the total number of "
+                    "batches across epochs, set `check_val_every_n_epoch=None`. To disable "
+                    "validation set `limit_val_batches=0`."
+                )
+            self.val_check_batch = interval
+        else:
+            # float fraction of an epoch
+            self.val_check_batch = max(1, int(max_batches * float(interval)))
+
+    def _should_check_val_epoch(self) -> bool:
+        """Epoch-level gate: whether validation runs at all this epoch."""
+        if not getattr(self, "val_dataloaders", None):
             return False
-        return step % val_interval == 0
+        if getattr(self, "limit_val_batches", 1.0) == 0:
+            return False
+        n = self.check_val_every_n_epoch
+        return n is None or (self.current_epoch + 1) % n == 0
+
+    def _should_check_val_step(self, batch_idx: int) -> bool:
+        """Whether validation should run after the training batch at ``batch_idx``.
+
+        Uses the epoch-local ``batch_idx`` (so gradient accumulation does not
+        cause duplicate triggers) unless ``check_val_every_n_epoch is None``, in
+        which case the global batch count across epochs drives the schedule.
+        """
+        if not self._should_check_val_epoch():
+            return False
+
+        # time-based scheduling
+        if self._val_check_time_interval is not None:
+            return (time.monotonic() - self._last_val_time) >= self._val_check_time_interval
+
+        vcb = self.val_check_batch
+        if not vcb or vcb <= 0:
+            return False
+
+        if self.check_val_every_n_epoch is None:
+            current_iteration = self.current_epoch * self._val_check_max_batches + batch_idx
+        else:
+            current_iteration = batch_idx
+        return (current_iteration + 1) % vcb == 0
 
     def _should_stop(self) -> bool:
         return self.should_stop or (0 < self.max_steps <= self._dataloader_step)
@@ -623,25 +921,29 @@ class Trainer:
         return False
 
     def _sanity_check(self, model: Any, device: Any) -> None:
-        """Run sanity check — aligned with Lightning behavior.
+        """Run sanity check.
 
         - Calls ``on_sanity_check_start/end`` (NOT ``on_validation_start/end``).
         - Resets logged metrics before/after so ``val/loss`` does not leak
           into training step-0 log flushes.
-        - Does NOT call ``empty_cache()`` (Lightning doesn't either; any
+        - Does NOT call ``empty_cache()``; any
           memory issue is a real leak that must be fixed at the root).
         """
         from ocean.trainer.call import _call_callback_hooks
 
-        # Reset metrics before sanity check (Lightning-style)
-        self._logger_connector.reset_validation_metrics()
+        # Sanity metrics log into a throwaway eval collection so they cannot leak
+        # into training accumulation; the previous collection is restored after.
+        prev_results = self._results
+        prev_stage = self.state.stage
+        self._results = _ResultCollection(training=False, fork_names=False)
 
+        self.state.stage = RunningStage.SANITY_CHECKING
         self.sanity_checking = True
         model.eval()
         try:
             _call_callback_hooks(self, "on_sanity_check_start")
             # Call on_validation_start/epoch_end hooks, matching
-            # Lightning's val_loop.run which calls _on_evaluation_start
+            # val_loop.run which calls _on_evaluation_start
             # before batches and _on_evaluation_epoch_end after.
             _call_module_hook(self, "on_validation_start")
             _call_callback_hooks(self, "on_validation_start")
@@ -658,13 +960,16 @@ class Trainer:
                         count += 1
             _call_module_hook(self, "on_validation_epoch_end")
             _call_callback_hooks(self, "on_validation_epoch_end")
+            _call_module_hook(self, "on_validation_end")
+            _call_callback_hooks(self, "on_validation_end")
         finally:
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
-            model.train()  # restore train mode after sanity check
-            # Reset metrics again after sanity check (Lightning-style)
-            # so val/* metrics don't pollute training step-0 log flushes
+            self.state.stage = prev_stage
+            model.train()
+            # Discard sanity metrics and restore the pre-sanity collection.
             self._logger_connector.reset_validation_metrics()
+            self._results = prev_results
 
     def _teardown(self) -> None:
         self.strategy.teardown()
@@ -672,3 +977,6 @@ class Trainer:
         self.fit_loop.teardown()
         if self.datamodule is not None:
             self.datamodule.teardown("fit")
+        # Clear the running stage so trainer.training/validating no longer read as
+        # active once fit has finished.
+        self.state.stage = None

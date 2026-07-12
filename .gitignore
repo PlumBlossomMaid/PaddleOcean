@@ -31,3 +31,9 @@ dist/
 build/
 *.egg-info/
 *.ckpt
+*.pdparams
+ocean_logs/
+log/
+
+# Sphinx docs build
+docs/_build/

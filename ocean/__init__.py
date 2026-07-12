@@ -1,4 +1,4 @@
-"""paddleOcean - A high-level PaddlePaddle framework inspired by paddleOcean.
+"""ocean - A high-level PaddlePaddle training framework.
 
 Usage::
 
@@ -52,12 +52,6 @@ warnings.filterwarnings(
     message="blocking is not supported.*",
     category=UserWarning,
 )
-
-# ====================================================================
-# Auto device detection — set best available device on import
-# ====================================================================
-if _paddle.is_compiled_with_cuda():
-    _paddle.set_device("gpu")
 
 # ====================================================================
 # Compat-wrapped APIs

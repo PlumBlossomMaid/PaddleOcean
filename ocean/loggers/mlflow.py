@@ -1,4 +1,8 @@
-"""MLFlowLogger - logs metrics to MLflow."""
+"""MLFlowLogger - logs metrics to MLflow.
+
+Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
+only rank 0 writes to MLflow.
+"""
 
 import os
 import re
@@ -6,6 +10,7 @@ import time
 from typing import Any, Mapping, Optional
 
 from ocean.loggers.base import Logger
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only, rank_zero_warn
 
 
 class MLFlowLogger(Logger):
@@ -48,6 +53,7 @@ class MLFlowLogger(Logger):
         self._experiment_id = None
 
     @property
+    @rank_zero_experiment
     def experiment(self) -> Any:
         if self._experiment is None:
             self._experiment = self._create_experiment()
@@ -95,6 +101,7 @@ class MLFlowLogger(Logger):
     def save_dir(self) -> Optional[str]:
         return self._save_dir
 
+    @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any]) -> None:
         try:
             import mlflow
@@ -109,9 +116,10 @@ class MLFlowLogger(Logger):
                     batch = []
             if batch:
                 self.experiment.log_batch(run_id=self._run_id, params=batch)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"MLFlowLogger.log_hyperparams failed: {e}")
 
+    @rank_zero_only
     def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
         try:
             import mlflow
@@ -132,16 +140,17 @@ class MLFlowLogger(Logger):
                 mlflow.entities.Metric(k, v, int(time.time() * 1000), step or 0) for k, v in prefixed.items()
             ]
             self.experiment.log_batch(run_id=self._run_id, metrics=metrics_list)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"MLFlowLogger.log_metrics failed: {e}")
 
+    @rank_zero_only
     def finalize(self, status: str = "success") -> None:
         try:
             import mlflow
 
             mlflow.end_run()
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"MLFlowLogger.finalize failed: {e}")
 
     @staticmethod
     def _flatten_dict(d: dict, parent_key: str = "", sep: str = ".") -> dict:

@@ -1,14 +1,17 @@
 """OceanOptimizer and optimizer initialization utilities."""
 
+import warnings
 from typing import Any, Optional
 
 import paddle
+
+from ocean.utils import MisconfigurationException
 
 
 class OceanOptimizer:
     """Wrapper around a Paddle optimizer that adds hooks for the training loop.
 
-    Analogous to paddleOceanOptimizer in paddleOcean.
+    Wraps a Paddle optimizer with training-loop step hooks.
     """
 
     def __init__(self, optimizer: paddle.optimizer.Optimizer) -> None:
@@ -70,15 +73,80 @@ def init_optimizers_and_lr_schedulers(model: Any) -> tuple[list, list]:
         opt = result.get("optimizer")
         if opt is not None:
             optimizers = [opt]
-        sch = result.get("lr_scheduler")
-        if sch is not None:
+        sch_or_cfg = result.get("lr_scheduler")
+        if sch_or_cfg is not None:
+            if isinstance(sch_or_cfg, dict):
+                cfg = sch_or_cfg
+                scheduler = cfg.get("scheduler", cfg)
+                interval = cfg.get("interval", "epoch")
+                frequency = cfg.get("frequency", 1)
+                monitor = cfg.get("monitor")
+            else:
+                scheduler = sch_or_cfg
+                interval = result.get("interval", "epoch")
+                frequency = result.get("frequency", 1)
+                monitor = result.get("monitor")
             lr_schedulers = [
                 {
-                    "scheduler": sch,
-                    "interval": result.get("interval", "epoch"),
-                    "frequency": result.get("frequency", 1),
-                    "monitor": result.get("monitor"),
+                    "scheduler": scheduler,
+                    "interval": interval,
+                    "frequency": frequency,
+                    "monitor": monitor,
                 }
             ]
 
+    _validate_schedulers(lr_schedulers)
+    _warn_unbound_schedulers(optimizers, lr_schedulers)
     return optimizers, lr_schedulers
+
+
+def _validate_schedulers(lr_schedulers: list) -> None:
+    """Reject misconfigurations that would otherwise fail silently at step time.
+
+    A ``ReduceOnPlateau`` scheduler calls ``step(metric)`` and needs a monitored
+    metric; without one it has nothing to react to. Fail fast rather than
+    passing ``None`` to ``step`` at runtime.
+    """
+    plateau_type = None
+    try:
+        plateau_type = paddle.optimizer.lr.ReduceOnPlateau
+    except AttributeError:  # older paddle without ReduceOnPlateau
+        plateau_type = None
+    for cfg in lr_schedulers:
+        scheduler = cfg["scheduler"]
+        is_plateau = plateau_type is not None and isinstance(scheduler, plateau_type)
+        if is_plateau and cfg.get("monitor") is None:
+            raise MisconfigurationException(
+                "The lr scheduler dict must include a `monitor` when a "
+                "`ReduceOnPlateau` scheduler is used. For example: "
+                "{'optimizer': optimizer, 'lr_scheduler': "
+                "{'scheduler': scheduler, 'monitor': 'your_loss'}}"
+            )
+        interval = cfg.get("interval", "epoch")
+        if interval not in ("epoch", "step"):
+            raise MisconfigurationException(
+                f'The "interval" key in lr scheduler dict must be "step" or "epoch" but is "{interval}"'
+            )
+
+
+def _warn_unbound_schedulers(optimizers: list, lr_schedulers: list) -> None:
+    """Warn when an LR scheduler is not bound to any optimizer's ``learning_rate``.
+
+    In PaddlePaddle (where the scheduler holds a reference to the optimizer and
+    writes into its param groups), PaddlePaddle stores the schedule *inside* the
+    optimizer: it must be created as ``optimizer(learning_rate=scheduler, ...)``.
+    If that binding is missing, ``scheduler.step()`` silently has no effect on the
+    learning rate, so surface it early.
+    """
+    for cfg in lr_schedulers:
+        scheduler = cfg["scheduler"]
+        bound = any(getattr(opt, "_learning_rate", None) is scheduler for opt in optimizers)
+        if not bound:
+            warnings.warn(
+                "LR scheduler is not bound to any optimizer's learning_rate. In PaddlePaddle "
+                "the scheduler must be passed to the optimizer as "
+                "`paddle.optimizer.X(learning_rate=scheduler, ...)`; otherwise scheduler.step() "
+                "has no effect on the learning rate.",
+                UserWarning,
+                stacklevel=3,
+            )

@@ -3,12 +3,16 @@
 PaddlePaddle doesn't have native TensorBoard support.
 This logger bridges the gap by writing TensorBoard-format events
 via the `tensorboardX` or `visualdl` package.
+
+Uses ``@rank_zero_only`` and ``@rank_zero_experiment`` to ensure
+only rank 0 writes log files.
 """
 
 import os
 from typing import Any, Optional
 
 from ocean.loggers.base import Logger
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only, rank_zero_warn
 
 
 class TensorBoardLogger(Logger):
@@ -70,6 +74,7 @@ class TensorBoardLogger(Logger):
         return base
 
     @property
+    @rank_zero_experiment
     def experiment(self) -> Any:
         if self._experiment is None:
             self._experiment = self._create_writer()
@@ -94,13 +99,18 @@ class TensorBoardLogger(Logger):
 
             return _DummyWriter()
 
+    @rank_zero_only
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
-        for k, v in metrics.items():
-            key = f"{self._prefix}/{k}" if self._prefix else k
-            if hasattr(v, "item"):
-                v = v.item()
-            self.experiment.add_scalar(key, float(v), step or 0)
+        try:
+            for k, v in metrics.items():
+                key = f"{self._prefix}/{k}" if self._prefix else k
+                if hasattr(v, "item"):
+                    v = v.item()
+                self.experiment.add_scalar(key, float(v), step or 0)
+        except Exception as e:
+            rank_zero_warn(f"TensorBoardLogger.log_metrics failed: {e}")
 
+    @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any]) -> None:
         try:
             import yaml
@@ -110,12 +120,15 @@ class TensorBoardLogger(Logger):
                 yaml.dump(params, f)
         except ImportError:
             pass
+        except Exception as e:
+            rank_zero_warn(f"TensorBoardLogger.log_hyperparams failed: {e}")
 
+    @rank_zero_only
     def finalize(self, status: str) -> None:
         try:
             self.experiment.close()
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"TensorBoardLogger.finalize failed: {e}")
 
     def _get_next_version(self) -> str:
         base = os.path.join(self._save_dir, self._name)

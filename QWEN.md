@@ -145,9 +145,21 @@ trainer.fit(model, train_loader)
 - **钩子签名**：`(self, trainer, model, *args)` — trainer 和 model 总是前两个参数
 - **幂等性**：多次调用 `setup`/`teardown` 不应产生副作用
 
+### Metrics
+- **来源**：重导出自 `paddlemetrics`（对标 `torchmetrics`，从 TorchMetrics 移植）
+- **导入方式**：领域指标直接 `from paddlemetrics import Accuracy, ...`（对齐 Lightning 不重新导出的模式）
+- **核心类型**：`Metric`、`CompositionalMetric`、`MetricCollection` 在 `ocean.metrics` 中可用
+- **`self.log()` 集成**：传递 `Metric` 对象给 `self.log()` 时，框架自动：
+  - `on_step`：使用 `metric._forward_cache` 记录 batch 值
+  - `on_epoch`：调用 `metric.compute()` 获取 epoch 值
+  - `reduce_fx` 被忽略（Metric 自行处理归约）——对齐 Lightning
+  - 分布式同步由 `paddlemetrics.Metric.sync()` 内部处理
+- **多卡**：每个 Metric 内置 `dist_sync_on_step` / `sync_on_compute` 控制
+
 ### Loggers
 - **路径结构**：`{root_dir}/{name}/version_{N}/metrics.csv`
 - **Ocean 特有**：`VisualDLLogger`（VisualDL）、`OceanLogger`（统一包装）
+- **多卡保护（对齐 Lightning）**：所有 7 个 logger 均使用 `@rank_zero_only` 和 `@rank_zero_experiment` 保护，确保非 rank 0 进程不执行写操作。详见 PR #5。
 
 ### Strategies
 - **DDP 流程**：`setup → accelerator.setup → precision.convert_module → model_to_device → DataParallel → setup_optimizers`
@@ -156,6 +168,11 @@ trainer.fit(model, train_loader)
 ### Accelerators
 - **Paddle 设备体系**：`CPUPlace` / `CUDAPlace` / `XPUPlace` / `IPUPlace` / `CustomPlace(device_type)`
 - **检测**：`paddle.is_compiled_with_cuda()` / `is_compiled_with_rocm()` / `is_compiled_with_xpu()`
+- **XPU vs CustomDevice 差异**：
+  - XPU 硬编码在 Paddle 主框架中（不是 CustomDevice 插件），通过 `is_compiled_with_xpu()` 检测
+  - 昇腾/寒武纪/天数等国产卡走 `CustomDevice` + `paddle.CustomPlace(device_type)`
+  - `paddle.device.get_all_custom_device_type()` **不会**返回 `"xpu"`
+- **XPU P800 适配文档**：见 `.qwen/skills/xpu-p800-setup.md` 及下方「XPU P800 环境」章节
 
 ### Cloud SDK（AI Studio）
 `ocean/cli/cloud/` — 百度 AI Studio 云 SDK，上传/下载/认证/任务管理。
@@ -215,3 +232,76 @@ pip install -e . --no-build-isolation
 pytest tests/ -v --timeout=120   # 57 tests, GPU 自动使用
 python ocean_demo.py --epochs 3  # 三种模式演示
 ```
+
+## XPU P800 环境（昆仑芯）
+
+### 硬件概述
+
+昆仑芯 P800 是百度自研 AI 加速卡：
+- **显存**：32 GB HBM2e
+- **Paddle 集成方式**：硬编码在主框架中（非 CustomDevice 插件）
+- **检测 API**：`paddle.is_compiled_with_xpu()`
+
+### 安装
+
+```bash
+# nightly 版本
+python -m pip install --pre paddlepaddle-xpu \
+  -i https://www.paddlepaddle.org.cn/packages/nightly/xpu-p800/
+
+# 稳定版本
+python -m pip install paddlepaddle-xpu \
+  -i https://www.paddlepaddle.org.cn/packages/stable/xpu-p800/
+```
+
+验证：
+```bash
+python -c "import paddle; print(paddle.is_compiled_with_xpu())"  # → True
+```
+
+### 必需环境变量
+
+```bash
+export XPU_FORCE_USERMODE_LAUNCH=1
+export XBLAS_FC_HBM_VERSION=40
+export XPU_CDNN_CLUSTER_PARALLEL=1
+export XPU_CDNN_CLUSTER_PARALLEL_STREAM_NUMBER=2
+export XPU_PADDLE_L3_SIZE0=1024
+export XPU_PADDLE_L3_SIZE1=1024
+export XPUAPI_DEFAULT_SIZE0=1502653248
+export XPUAPI_DEFAULT_SIZE1=380265324
+export FLAGS_set_to_1d=False
+export FLAGS_use_stride_kernel="0"
+```
+
+### Ocean 使用方式
+
+```python
+import ocean
+
+trainer = ocean.Trainer(accelerator="xpu", max_epochs=10)
+trainer.fit(model, train_loader)
+
+# 手动
+acc = ocean.XPUAccelerator()
+print(acc.is_available())  # → True
+```
+
+### 与 GPU 差异
+
+- GPU: `paddle.set_device("gpu")` / `paddle.CUDAPlace(0)`
+- XPU: `paddle.set_device("xpu")` / `paddle.XPUPlace(0)`
+
+Ocean 的 `XPUAccelerator` 已封装此差异，用户只需 `accelerator="xpu"`。
+
+### 监控
+
+```bash
+xpu_smi   # 类似 nvidia-smi
+```
+
+### 注意事项
+
+1. `paddle.device.get_all_custom_device_type()` **不包含** `"xpu"`
+2. `paddle.stft()` 产生的 complex128 在 XPU 上跑 `abs()` 会失败 — Ocean 的 compat 测试已自动 skip
+3. 环境变量必须在 Python 进程启动前设置

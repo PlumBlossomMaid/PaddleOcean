@@ -26,12 +26,17 @@ class LearningRateMonitor(Callback):
         self._record_lr(trainer, model)
 
     def _record_lr(self, trainer: Any, model: Any) -> None:
-        optimizers = trainer._optimizers
+        optimizers = trainer.optimizers
         for i, opt_wrapper in enumerate(optimizers):
             opt = opt_wrapper._optimizer
             lr = getattr(opt, "_learning_rate", None)
             if lr is not None:
-                actual_lr = lr.numpy() if hasattr(lr, "numpy") else lr
+                if hasattr(lr, "get_lr"):
+                    actual_lr = lr.get_lr()
+                elif hasattr(lr, "numpy"):
+                    actual_lr = lr.numpy()
+                else:
+                    actual_lr = lr
                 if hasattr(actual_lr, "__iter__"):
                     for j, lr_val in enumerate(actual_lr):
                         model.log(f"lr/lr_{i}_group_{j}", lr_val)

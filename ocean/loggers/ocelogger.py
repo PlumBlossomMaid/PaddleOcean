@@ -1,12 +1,17 @@
-"""ocelogger - Unified logger wrapper for paddleOcean.
+"""ocelogger - Unified logger wrapper for ocean.
 
-Analogous to ocean's LitLogger.
+Wraps multiple loggers behind one interface.
 Provides a consistent interface for all loggers.
+
+Uses ``@rank_zero_only`` on all write methods so non-rank-0
+processes skip all logger delegation (belt-and-suspenders with
+individual logger decorators).
 """
 
 from typing import Any, Optional, Union
 
 from ocean.loggers.base import Logger
+from ocean.utils.rank_zero import rank_zero_only, rank_zero_warn
 
 
 class OceanLogger:
@@ -30,33 +35,37 @@ class OceanLogger:
     def loggers(self) -> list[Logger]:
         return self._loggers
 
+    @rank_zero_only
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
         for lg in self._loggers:
             try:
                 lg.log_metrics(metrics, step)
-            except Exception:
-                pass
+            except Exception as e:
+                rank_zero_warn(f"OceanLogger.log_metrics[{type(lg).__name__}] failed: {e}")
 
+    @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any]) -> None:
         for lg in self._loggers:
             try:
                 lg.log_hyperparams(params)
-            except Exception:
-                pass
+            except Exception as e:
+                rank_zero_warn(f"OceanLogger.log_hyperparams[{type(lg).__name__}] failed: {e}")
 
+    @rank_zero_only
     def save(self) -> None:
         for lg in self._loggers:
             try:
                 lg.save()
-            except Exception:
-                pass
+            except Exception as e:
+                rank_zero_warn(f"OceanLogger.save[{type(lg).__name__}] failed: {e}")
 
+    @rank_zero_only
     def finalize(self, status: str = "success") -> None:
         for lg in self._loggers:
             try:
                 lg.finalize(status)
-            except Exception:
-                pass
+            except Exception as e:
+                rank_zero_warn(f"OceanLogger.finalize[{type(lg).__name__}] failed: {e}")
 
     def __getitem__(self, idx: int) -> Logger:
         return self._loggers[idx]
