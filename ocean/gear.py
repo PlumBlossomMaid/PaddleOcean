@@ -11,6 +11,7 @@ Multi-GPU support::
     # ... training loop ...
 """
 
+from contextlib import nullcontext
 from typing import Any, Optional, Union
 
 import paddle
@@ -264,8 +265,10 @@ class Gear:
 
     def autocast(self) -> Any:
         """Return an autocast context manager for mixed precision."""
-        if self.precision_flag == "16":
+        if self.precision_flag in ("16", "16-mixed"):
             return paddle.amp.auto_cast(level="O1")
-        elif self.precision_flag == "bf16":
+        elif self.precision_flag in ("bf16", "bf16-mixed"):
             return paddle.amp.auto_cast(level="O2", dtype="bfloat16")
-        return paddle.no_grad()  # no-op context for fp32
+        # fp32 / fp64: return a no-op context so grads are NOT disabled — using
+        # `paddle.no_grad()` here would silently break backward under fp32.
+        return nullcontext()
