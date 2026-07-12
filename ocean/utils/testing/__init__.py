@@ -1,6 +1,6 @@
 """Testing utilities: conditional skipping, dtype-aware tolerances.
 
-Analogous to ocean's testing/_runif.py.
+Test helpers: conditional skips based on the runtime environment.
 
 Usage::
     @RunIf(min_cuda_version="11.0")

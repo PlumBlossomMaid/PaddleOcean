@@ -1,6 +1,6 @@
 """DataModule - data lifecycle management.
 
-Inspired by ocean.DataModule. Manages prepare_data/setup/teardown
+Manages prepare_data/setup/teardown
 and provides dataloader factory methods.
 """
 

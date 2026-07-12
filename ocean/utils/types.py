@@ -1,4 +1,4 @@
-"""Type definitions for paddleOcean."""
+"""Type definitions for ocean."""
 
 from typing import Any, Mapping, Optional, Union
 

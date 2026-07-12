@@ -1,4 +1,4 @@
-"""Utils package for paddleOcean."""
+"""Utils package for ocean."""
 
 from ocean.utils.enums import OceanEnum
 from ocean.utils.exceptions import MisconfigurationException

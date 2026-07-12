@@ -1,4 +1,4 @@
-"""Strategies package for paddleOcean."""
+"""Strategies package for ocean."""
 
 from ocean.strategies.ddp import DDPStrategy
 from ocean.strategies.deepspeed import DeepSpeedStrategy

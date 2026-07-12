@@ -1,4 +1,4 @@
-"""paddleOcean - A high-level PaddlePaddle framework inspired by paddleOcean.
+"""ocean - A high-level PaddlePaddle training framework.
 
 Usage::
 

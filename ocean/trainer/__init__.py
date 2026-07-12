@@ -44,8 +44,8 @@ def _patch_ddp_attr_forward(ddp_model: paddle.nn.Layer) -> None:
     attribute accesses are forwarded to the underlying ``_layers`` module.
 
     PaddlePaddle's ``DataParallel`` does **not** forward custom attributes
-    like ``training_step``, ``on_train_batch_start``, unlike PyTorch's DDP.
-    This patch makes Ocean training loops work transparently with DDP.
+    like ``training_step``, ``on_train_batch_start``. This patch makes ocean
+    training loops work transparently with DDP.
     """
     original_class = type(ddp_model)
 
@@ -824,7 +824,7 @@ class Trainer:
     def _setup_val_check_batch(self, max_batches: int) -> None:
         """Resolve ``val_check_interval`` into a concrete schedule for this fit run.
 
-        Mirrors the reference resolution:
+        Resolution order:
         - ``int``   → validate every N training batches (must be <= max_batches
           unless ``check_val_every_n_epoch is None``, i.e. batches span epochs).
         - ``float`` → fraction of an epoch; validate every

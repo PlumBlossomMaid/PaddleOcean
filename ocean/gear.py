@@ -1,4 +1,4 @@
-"""ocean.Gear - lightweight manual training API (Fabric equivalent).
+"""ocean.Gear - lightweight manual training API for user-driven loops.
 
 Gear provides manual control over training with minimal boilerplate.
 Users write their own training loop while Gear handles device placement,
@@ -20,7 +20,7 @@ from ocean.strategies import DDPStrategy, Strategy
 
 
 class Gear:
-    """Lightweight manual training API (analogous to ocean Fabric).
+    """Lightweight manual training API for user-driven training loops.
 
     Usage::
 
@@ -60,7 +60,7 @@ class Gear:
         self._strategy: Optional[Strategy] = None
         self._accelerator: Optional[Accelerator] = None
 
-        # Resolve accelerator and strategy (aligned with _AcceleratorConnector)
+        # Resolve accelerator and strategy
         self._resolve()
 
     @property
@@ -73,7 +73,7 @@ class Gear:
         return self._strategy
 
     # ------------------------------------------------------------------
-    # Resolution — mirrors _AcceleratorConnector logic
+    # Resolution — accelerator/strategy selection logic
     # ------------------------------------------------------------------
 
     def _resolve(self) -> None:
@@ -92,7 +92,7 @@ class Gear:
         return SingleDeviceStrategy(device="cpu")
 
     # ------------------------------------------------------------------
-    # Launch — multi-process entry point (Fabric.launch equivalent)
+    # Launch — multi-process entry point
     # ------------------------------------------------------------------
 
     def launch(self) -> None:
@@ -130,7 +130,7 @@ class Gear:
 
         if self._strategy:
             self._strategy._model = module
-            # Only DDP-wrap on the first call (like Fabric)
+            # Only DDP-wrap on the first call
             if self._models_setup == 1 and isinstance(self._strategy, DDPStrategy):
                 self._strategy.model_to_device()
                 if self._strategy._is_initialized:

@@ -1,4 +1,4 @@
-"""Exceptions for paddleOcean."""
+"""Exceptions for ocean."""
 
 
 class MisconfigurationError(Exception):

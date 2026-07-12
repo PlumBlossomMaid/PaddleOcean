@@ -1,4 +1,4 @@
-"""Base precision plugin for paddleOcean."""
+"""Base precision plugin for ocean."""
 
 from typing import Any
 

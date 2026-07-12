@@ -1,4 +1,4 @@
-"""Configuration validator for paddleOcean Trainer."""
+"""Configuration validator for the ocean Trainer."""
 
 from typing import Any
 

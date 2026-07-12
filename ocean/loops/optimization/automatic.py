@@ -1,8 +1,7 @@
 """_AutomaticOptimization - handles automatic backward + optimizer step.
 
-Note: PaddlePaddle's Optimizer.step() does NOT accept a closure argument
-(unlike the reference framework, where the closure is handed to the optimizer).
-We run the forward/backward inline and then call step() directly.
+Note: PaddlePaddle's Optimizer.step() does NOT accept a closure argument, so we
+run the forward/backward inline and then call step() directly.
 
 The accumulation decision (whether this batch closes an accumulation window)
 is owned by :class:`_TrainingEpochLoop` and passed in as ``should_step`` — this

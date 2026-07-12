@@ -1,6 +1,6 @@
 """Timer callback - stop training after a time duration.
 
-Fully aligned with paddleOcean's Timer callback (non-TPU, non-XLA parts).
+Tracks elapsed training time and stops training when a time budget is hit.
 
 Usage:
     from ocean.callbacks import Timer

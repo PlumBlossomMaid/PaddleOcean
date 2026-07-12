@@ -1,6 +1,6 @@
 """Advanced profiler using PaddlePaddle's profiler API.
 
-Analogous to ocean's advanced profiler.
+Advanced profiler with per-action cProfile stats.
 """
 
 import time
