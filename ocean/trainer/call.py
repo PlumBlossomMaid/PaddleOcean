@@ -28,12 +28,47 @@ def _call_module_hook(trainer: Any, hook_name: str, *args: Any, **kwargs: Any) -
 
 
 def _call_and_handle_interrupt(trainer: Any, trainer_fn: Any, *args: Any, **kwargs: Any) -> Any:
-    """Wrap a trainer function with interrupt handling."""
+    """Wrap a trainer entry-point with interrupt handling.
+
+    All entry-point exceptions funnel through here. On an exception we run the
+    interrupt path — set INTERRUPTED, dispatch ``on_exception`` hooks,
+    finalize loggers as ``"failed"`` and teardown — so resources are released
+    and callbacks see the exception before re-raising.
+    """
     try:
         return trainer_fn(*args, **kwargs)
-    except KeyboardInterrupt:
-        trainer._signal_connector.received_sigterm = True
+    except KeyboardInterrupt as exception:
+        _interrupt(trainer, exception)
+        trainer._teardown()
         raise
+    except BaseException as exception:  # noqa: BLE001 — intentional funnel
+        _interrupt(trainer, exception)
+        trainer._teardown()
+        raise
+
+
+def _interrupt(trainer: Any, exception: BaseException) -> None:
+    """Run the interrupt bookkeeping so a failure still tears down cleanly."""
+    from ocean.trainer.states import TrainerStatus
+
+    trainer.state.status = TrainerStatus.INTERRUPTED
+    trainer._signal_connector.received_sigterm = True
+
+    # Give callbacks/model a chance to observe the exception before teardown.
+    _call_callback_hooks(trainer, "on_exception", exception)
+    model = trainer._model
+    if model is not None and hasattr(model, "on_exception"):
+        model._current_fx_name = "on_exception"
+        try:
+            model.on_exception(exception)
+        finally:
+            model._current_fx_name = None
+
+    strategy = getattr(trainer, "strategy", None)
+    if strategy is not None and hasattr(strategy, "on_exception"):
+        strategy.on_exception(exception)
+
+    trainer._logger_connector.finalize("failed")
 
 
 def _call_setup_hook(trainer: Any) -> None:

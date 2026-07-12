@@ -45,6 +45,31 @@ class _LoggerConnector:
             if hasattr(lg, "log_metrics"):
                 lg.log_metrics(metrics, step)
 
+    def log_hyperparams(self, params: Optional[dict[str, Any]] = None) -> None:
+        """Dispatch hyperparameters to each logger.
+
+        Called once near the start of fit so every backend records the model's
+        hparams. Backends without their dependency installed degrade silently
+        rather than fail the run (see per-logger fallback semantics).
+        """
+        if not params:
+            return
+        for lg in getattr(self.trainer, "loggers", None) or []:
+            if hasattr(lg, "log_hyperparams"):
+                lg.log_hyperparams(params)
+
+    def finalize(self, status: str) -> None:
+        """Ask every logger to finalize its run with the given status.
+
+        ``status`` is ``"success"`` on clean completion of an entry-point call
+        (fit/validate/test/predict) and ``"failed"`` when an exception bubbled
+        out. Releases writers / closes runs (Wandb finish, MLflow end_run,
+        TensorBoard/VisualDL writer close, CSV flush).
+        """
+        for lg in getattr(self.trainer, "loggers", None) or []:
+            if hasattr(lg, "finalize"):
+                lg.finalize(status)
+
     # ------------------------------------------------------------------
     # Snapshot refresh from the active result collection
     # ------------------------------------------------------------------

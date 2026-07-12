@@ -541,6 +541,14 @@ class Trainer:
         _call_module_hook(self, "on_fit_start")
         _call_callback_hooks(self, "on_fit_start")
 
+        # Log hyperparameters once near the start of fit so every backend
+        # records them (Wandb config, MLflow params, ...). Gated by
+        # enable_autolog_hparams; callbacks/strategy are already attached.
+        if self.enable_autolog_hparams:
+            hparams = getattr(self._model, "hparams", None)
+            if hparams:
+                self._logger_connector.log_hyperparams(dict(hparams))
+
         # Install SIGTERM handler for graceful shutdown (restored in _teardown).
         self._signal_connector.register_signal_handlers()
 
@@ -554,6 +562,9 @@ class Trainer:
         # Fit end hooks
         _call_module_hook(self, "on_fit_end")
         _call_callback_hooks(self, "on_fit_end")
+
+        # Signal clean completion so each backend closes its run/writer.
+        self._logger_connector.finalize("success")
         self._teardown()
 
     def _advance_optimizer_step(self) -> None:
