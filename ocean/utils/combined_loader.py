@@ -2,6 +2,8 @@
 
 from typing import Any, Iterator
 
+from ocean.utils.exceptions import MisconfigurationException
+
 
 class CombinedLoader(Iterator):
     """Wrapper for iterating over multiple dataloaders sequentially or in parallel.
@@ -12,6 +14,12 @@ class CombinedLoader(Iterator):
     """
 
     def __init__(self, loaders: Any, mode: str = "sequential") -> None:
+        if mode != "sequential":
+            raise MisconfigurationException(
+                f"CombinedLoader mode {mode!r} is not implemented. Only "
+                "'sequential' is supported; 'min_size'/'max_size' require a "
+                "value-aware merge that isn't wired up, so reject up front."
+            )
         if not isinstance(loaders, (list, tuple)):
             loaders = [loaders]
         self.loaders = loaders
