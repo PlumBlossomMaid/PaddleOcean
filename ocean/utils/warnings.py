@@ -1,4 +1,4 @@
-"""Warning utilities for paddleOcean.
+"""Warning utilities for ocean.
 
 ``rank_zero_warn`` and ``WarningCache`` are re-exported from
 ``ocean.utils.rank_zero`` — this module exists for backward compat.

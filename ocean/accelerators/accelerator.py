@@ -1,4 +1,4 @@
-"""Accelerator base class for paddleOcean."""
+"""Accelerator base class for ocean."""
 
 from abc import ABC, abstractmethod
 from typing import Any

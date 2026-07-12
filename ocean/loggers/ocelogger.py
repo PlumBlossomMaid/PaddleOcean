@@ -1,6 +1,6 @@
-"""ocelogger - Unified logger wrapper for paddleOcean.
+"""ocelogger - Unified logger wrapper for ocean.
 
-Analogous to ocean's LitLogger.
+Wraps multiple loggers behind one interface.
 Provides a consistent interface for all loggers.
 
 Uses ``@rank_zero_only`` on all write methods so non-rank-0

@@ -1,4 +1,4 @@
-"""Accelerators package for paddleOcean."""
+"""Accelerators package for ocean."""
 
 from ocean.accelerators.accelerator import Accelerator
 from ocean.accelerators.cpu import CPUAccelerator

@@ -1,4 +1,4 @@
-"""Model helpers for paddleOcean."""
+"""Model helpers for ocean."""
 
 from typing import Any
 

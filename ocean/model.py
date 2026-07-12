@@ -371,7 +371,7 @@ class Model(nn.Layer):
     ) -> None:
         """Log a dictionary of metrics at once.
 
-        Mirrors paddleOcean's log_dict.
+        Log a dict of scalar metrics in one call.
         """
         for name, value in dictionary.items():
             self.log(

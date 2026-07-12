@@ -1,4 +1,4 @@
-"""Enum utilities for paddleOcean."""
+"""Enum utilities for ocean."""
 
 from enum import Enum as _Enum
 

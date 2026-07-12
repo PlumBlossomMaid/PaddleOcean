@@ -4,15 +4,15 @@ This module gives each running stage (training vs evaluation) its own metric
 store so a mid-epoch validation pass can never clobber the training metrics
 accumulated earlier in the same epoch. Storage is keyed by ``fx.name`` and each
 value is reduced with a batch-size-weighted mean (or min/max/sum), so the epoch
-value matches the reference implementation's behavior rather than an unweighted
+value is a batch-size-weighted mean rather than an unweighted
 average of per-step means.
 
-Design notes (Paddle specifics, intentionally different from the reference):
-- Values are stored as Python floats. The reference keeps tensors so it can sync
+Design notes (Paddle specifics):
+- Values are stored as Python floats (tensors would be needed to sync
   across ranks at ``compute()`` time; here ``sync_dist`` is already applied in the
   logging path (``Trainer._log_metric``) before values reach this collection, so
   we only need scalar accumulation. This keeps distributed behavior unchanged.
-- ``_ResultMetric`` is a plain object (the reference subclasses
+- ``_ResultMetric`` is a plain object (rather than subclassing
   ``torchmetrics.Metric`` for state sync, which has no direct Paddle equivalent).
 - ``paddlemetrics.Metric`` objects are supported by delegating to their own
   ``compute()``, mirroring the metric-object path already present in the Trainer.

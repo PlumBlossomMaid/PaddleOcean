@@ -9,7 +9,7 @@ import paddle
 class OceanOptimizer:
     """Wrapper around a Paddle optimizer that adds hooks for the training loop.
 
-    Analogous to paddleOceanOptimizer in paddleOcean.
+    Wraps a Paddle optimizer with training-loop step hooks.
     """
 
     def __init__(self, optimizer: paddle.optimizer.Optimizer) -> None:
@@ -100,7 +100,7 @@ def init_optimizers_and_lr_schedulers(model: Any) -> tuple[list, list]:
 def _warn_unbound_schedulers(optimizers: list, lr_schedulers: list) -> None:
     """Warn when an LR scheduler is not bound to any optimizer's ``learning_rate``.
 
-    Unlike PyTorch (where the scheduler holds a reference to the optimizer and
+    In PaddlePaddle (where the scheduler holds a reference to the optimizer and
     writes into its param groups), PaddlePaddle stores the schedule *inside* the
     optimizer: it must be created as ``optimizer(learning_rate=scheduler, ...)``.
     If that binding is missing, ``scheduler.step()`` silently has no effect on the

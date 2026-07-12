@@ -1,6 +1,6 @@
-"""Wrappers for Gear - _FabricModule and _FabricOptimizer.
+"""Wrappers for Gear - _GearModule and _GearOptimizer.
 
-Analogous to paddleOcean Fabric's wrappers.py.
+Wrappers used by the manual training API (Gear).
 Wraps model forward/backward and optimizer step with precision/ddp handling.
 """
 
@@ -9,7 +9,7 @@ from typing import Any
 import paddle
 
 
-class _FabricModule(paddle.nn.Layer):
+class _GearModule(paddle.nn.Layer):
     """Wrapper around a model that handles precision conversion, device placement,
     and forward context automatically.
 
@@ -57,7 +57,7 @@ class _FabricModule(paddle.nn.Layer):
             self._module.set_dict(state_dict)
 
 
-class _FabricOptimizer:
+class _GearOptimizer:
     """Wrapper around an optimizer that delegates step/state_dict to the strategy."""
 
     def __init__(self, optimizer: paddle.optimizer.Optimizer, strategy: Any = None) -> None:

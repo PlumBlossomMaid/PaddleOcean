@@ -1,4 +1,4 @@
-"""Model registry for paddleOcean.
+"""Model registry for ocean.
 
 Stores and retrieves model configurations.
 """

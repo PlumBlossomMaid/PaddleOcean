@@ -1,4 +1,4 @@
-"""Gradient utilities for paddleOcean."""
+"""Gradient utilities for ocean."""
 
 from typing import Optional
 
