@@ -949,6 +949,8 @@ class Trainer:
                         count += 1
             _call_module_hook(self, "on_validation_epoch_end")
             _call_callback_hooks(self, "on_validation_epoch_end")
+            _call_module_hook(self, "on_validation_end")
+            _call_callback_hooks(self, "on_validation_end")
         finally:
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
