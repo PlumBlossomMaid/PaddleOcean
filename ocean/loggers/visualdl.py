@@ -9,7 +9,7 @@ import os
 from typing import Any, Optional
 
 from ocean.loggers.base import Logger
-from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only, rank_zero_warn
 
 
 class VisualDLLogger(Logger):
@@ -99,6 +99,8 @@ class VisualDLLogger(Logger):
                 yaml.dump(params, f)
         except ImportError:
             pass
+        except Exception as e:
+            rank_zero_warn(f"VisualDLLogger.log_hyperparams failed: {e}")
 
     @rank_zero_only
     def save(self) -> None:
@@ -109,8 +111,8 @@ class VisualDLLogger(Logger):
         if self._experiment is not None:
             try:
                 self._experiment.close()
-            except Exception:
-                pass
+            except Exception as e:
+                rank_zero_warn(f"VisualDLLogger.finalize failed: {e}")
 
     def _get_next_version(self) -> int:
         """Scan log dir for existing version_N dirs and auto-increment."""

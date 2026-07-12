@@ -7,7 +7,7 @@ only rank 0 writes to W&B.
 from typing import Any, Mapping, Optional
 
 from ocean.loggers.base import Logger
-from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only, rank_zero_warn
 
 
 class WandbLogger(Logger):
@@ -107,15 +107,15 @@ class WandbLogger(Logger):
                 prefixed[key] = float(v)
             log_kwargs = {"step": step} if step is not None else {}
             self.experiment.log(prefixed, **log_kwargs)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"WandbLogger.log_metrics failed: {e}")
 
     @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any]) -> None:
         try:
             self.experiment.config.update(params, allow_val_change=True)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"WandbLogger.log_hyperparams failed: {e}")
 
     @rank_zero_only
     def finalize(self, status: str) -> None:
@@ -124,15 +124,15 @@ class WandbLogger(Logger):
 
             if wandb.run is not None:
                 wandb.finish(exit_code=0 if status == "success" else 1)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"WandbLogger.finalize failed: {e}")
 
     @rank_zero_only
     def watch(self, model: Any, log: str = "gradients", log_freq: int = 100) -> None:
         try:
             self.experiment.watch(model, log=log, log_freq=log_freq)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"WandbLogger.watch failed: {e}")
 
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()

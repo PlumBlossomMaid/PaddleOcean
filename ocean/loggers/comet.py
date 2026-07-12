@@ -7,7 +7,7 @@ only rank 0 writes to CometML.
 from typing import Any, Mapping, Optional
 
 from ocean.loggers.base import Logger
-from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only, rank_zero_warn
 
 
 class CometLogger(Logger):
@@ -103,8 +103,8 @@ class CometLogger(Logger):
                 flatten_nested=True,
                 source="manual",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"CometLogger.log_hyperparams failed: {e}")
 
     @rank_zero_only
     def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
@@ -122,15 +122,15 @@ class CometLogger(Logger):
                 prefix=self._prefix,
                 framework="paddle-ocean",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"CometLogger.log_metrics failed: {e}")
 
     @rank_zero_only
     def finalize(self, status: str) -> None:
         try:
             self.experiment.end()
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"CometLogger.finalize failed: {e}")
 
     @rank_zero_only
     def log_graph(self, model: Any, input_array: Any = None) -> None:

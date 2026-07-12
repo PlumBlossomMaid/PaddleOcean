@@ -10,7 +10,7 @@ import time
 from typing import Any, Mapping, Optional
 
 from ocean.loggers.base import Logger
-from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
+from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only, rank_zero_warn
 
 
 class MLFlowLogger(Logger):
@@ -116,8 +116,8 @@ class MLFlowLogger(Logger):
                     batch = []
             if batch:
                 self.experiment.log_batch(run_id=self._run_id, params=batch)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"MLFlowLogger.log_hyperparams failed: {e}")
 
     @rank_zero_only
     def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
@@ -140,8 +140,8 @@ class MLFlowLogger(Logger):
                 mlflow.entities.Metric(k, v, int(time.time() * 1000), step or 0) for k, v in prefixed.items()
             ]
             self.experiment.log_batch(run_id=self._run_id, metrics=metrics_list)
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"MLFlowLogger.log_metrics failed: {e}")
 
     @rank_zero_only
     def finalize(self, status: str = "success") -> None:
@@ -149,8 +149,8 @@ class MLFlowLogger(Logger):
             import mlflow
 
             mlflow.end_run()
-        except Exception:
-            pass
+        except Exception as e:
+            rank_zero_warn(f"MLFlowLogger.finalize failed: {e}")
 
     @staticmethod
     def _flatten_dict(d: dict, parent_key: str = "", sep: str = ".") -> dict:
