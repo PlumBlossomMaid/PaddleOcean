@@ -291,12 +291,14 @@ class _CheckpointConnector:
         if "combined_loader" in ckpt:
             self.trainer.fit_loop._combined_loader_states_to_load = ckpt["combined_loader"]
 
-        # Restore hparams and any custom state added via on_save_checkpoint(),
-        # symmetric with dump_checkpoint().
-        if "hparams" in ckpt and hasattr(model, "hparams"):
-            model.hparams = ckpt["hparams"]
+        # Restore hparams (canonical "hyper_parameters" key, with backward-
+        # compatible fallback to the legacy "hparams" key), symmetric with
+        # dump_checkpoint() — both write/restore paths use "hyper_parameters".
         if hasattr(model, "on_load_checkpoint"):
             model.on_load_checkpoint(ckpt)
+        hparams = ckpt.get("hyper_parameters", ckpt.get("hparams"))
+        if hparams and hasattr(model, "hparams"):
+            model.hparams = hparams
 
     def dump_checkpoint(self, weights_only: bool = False) -> dict:
         """Build a complete checkpoint dictionary."""
@@ -346,7 +348,7 @@ class _CheckpointConnector:
                     checkpoint[type(self.trainer.datamodule).__qualname__] = ds
 
         if hasattr(model, "hparams") and model.hparams:
-            checkpoint["hparams"] = model.hparams
+            checkpoint["hyper_parameters"] = model.hparams
 
         callback_states = {}
         for cb in self.trainer.callbacks:
