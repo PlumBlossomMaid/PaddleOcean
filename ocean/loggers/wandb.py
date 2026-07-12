@@ -71,10 +71,19 @@ class WandbLogger(Logger):
         except ImportError:
 
             class _DummyExperiment:
-                def log(self, *args, **kwargs): ...
-                def config(self):
-                    return type("Config", (), {"update": lambda *a, **kw: None})()
+                # `experiment.config.update(...)` is the public wandb surface;
+                # expose `config` as an object with `.update` (not a method) so
+                # log_hyperparams doesn't raise AttributeError on the dummy when
+                # wandb isn't installed — that error was being swallowed and the
+                # hparams silently never recorded.
+                class _Config:
+                    def update(self, *a, **kw):  # noqa: D401, ANN001
+                        pass
 
+                config = _Config()
+                experiment_config = _Config()
+
+                def log(self, *args, **kwargs): ...
                 def finish(self): ...
                 def watch(self, *args, **kwargs): ...
 

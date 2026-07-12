@@ -81,7 +81,7 @@ class VisualDLLogger(Logger):
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
         """Log metrics — only writes on rank 0."""
         if step is None:
-            return
+            step = len(self._metrics) if hasattr(self, "_metrics") else 0
         for k, v in metrics.items():
             key = f"{self._prefix}/{k}" if self._prefix else k
             if hasattr(v, "item"):

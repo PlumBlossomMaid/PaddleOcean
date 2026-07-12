@@ -111,6 +111,16 @@ class _EvaluationLoop(_Loop):
         _call_callback_hooks(trainer, end_hook)
         model.train()
 
+        # Dispatch logged metrics to the loggers so a standalone validate/test
+        # run surfaces results through every backend (during fit, metrics from
+        # mid-epoch validation are flushed through the training step path).
+        from ocean.trainer.states import TrainerFn
+
+        if trainer.state.fn in (TrainerFn.VALIDATING, TrainerFn.TESTING):
+            logged = dict(trainer._log_metrics_on_epoch)
+            if logged and trainer.loggers:
+                trainer._logger_connector.log_metrics(logged, step=trainer.current_epoch)
+
         return [dict(trainer._log_metrics_on_epoch)]
 
     def teardown(self) -> None:
