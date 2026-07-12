@@ -6,6 +6,22 @@ from typing import Any
 class Callback:
     """Base class for all callbacks. All hooks have default no-op implementations."""
 
+    @property
+    def state_key(self) -> str:
+        """Identifies the callback's state in the checkpoint.
+
+        Two callbacks of the same type but different configuration (e.g. two
+        ``EarlyStopping`` on different monitors) must not collide on one key,
+        or restoring a checkpoint would load one callback's state into the
+        other. Subclasses override this (via :meth:`_generate_state_key`) to
+        fold their distinguishing arguments into the key.
+        """
+        return self.__class__.__qualname__
+
+    def _generate_state_key(self, **kwargs: Any) -> str:
+        """Build a state key from the class name plus distinguishing kwargs."""
+        return f"{self.__class__.__qualname__}{repr(sorted(kwargs.items()))}"
+
     def setup(self, trainer: Any, model: Any, stage: str) -> None: ...
     def teardown(self, trainer: Any, model: Any, stage: str) -> None: ...
 
