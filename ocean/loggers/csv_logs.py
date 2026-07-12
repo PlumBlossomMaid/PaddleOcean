@@ -131,7 +131,11 @@ class _ExperimentWriter:
 
         file_exists = os.path.exists(self.metrics_file)
         with open(self.metrics_file, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["step"] + [k for k in self.metrics_keys if k != "step"])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["step"] + [k for k in self.metrics_keys if k != "step"],
+                extrasaction="ignore",
+            )
             if not file_exists:
                 writer.writeheader()
             for m in self.metrics:
