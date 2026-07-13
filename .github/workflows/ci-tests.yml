@@ -83,6 +83,8 @@ jobs:
       - name: Install test dependencies
         run: |
           pip install pytest pytest-timeout parameterized scipy librosa tqdm
+          # click + requests are needed by the cloud CLI tests (ocean.cli.cloud).
+          pip install click requests
 
       - name: Install paddlemetrics (metrics dependency)
         run: |
