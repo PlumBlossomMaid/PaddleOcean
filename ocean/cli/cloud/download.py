@@ -86,6 +86,79 @@ def _auth_hint():
     )
 
 
+def _git_blob_sha1(path: Path) -> str:
+    """Compute the git blob SHA-1 of a file: ``sha1("blob <size>\\0" + content)``.
+
+    This is the hash the git/trees API reports in an entry's ``sha`` field for a
+    regular (non-LFS) file, so it is what a downloaded regular file must match.
+    Streamed so large files do not have to be read fully into memory.
+    """
+    import hashlib
+
+    size = path.stat().st_size
+    h = hashlib.sha1()
+    h.update(b"blob " + str(size).encode() + b"\x00")
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    """Streamed SHA-256 of a file's raw bytes (used to verify LFS content vs oid)."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _fetch_lfs_pointer_info(repo_id: str, file_path: str, token: str | None, revision: str):
+    """Return ``(is_lfs, oid, real_size)`` for a repo file via the Contents API.
+
+    AI Studio's ``media`` endpoint transparently dereferences LFS objects, so a
+    downloaded LFS file is the *real content* whose only correct checksum is the
+    LFS ``oid`` (a sha256). The git/trees ``sha``/``size`` describe the small LFS
+    *pointer*, not the content, so they cannot verify it. The Contents API returns
+    the pointer text (for LFS) or the real content (for small regular files),
+    which lets us tell the two apart and recover the real oid.
+
+    Returns ``(False, None, None)`` when the info cannot be resolved (caller then
+    falls back to git-blob-SHA1 verification against the git/trees sha).
+    """
+    import base64
+
+    git_host = os.getenv("STUDIO_GIT_HOST", _config.GIT_HOST)
+    user_name, repo_name = repo_id.split("/")
+    url = (
+        f"{git_host}/api/v1/repos/{quote(user_name, safe='')}/{quote(repo_name, safe='')}"
+        f"/contents/{quote(file_path, safe='')}"
+    )
+    if revision and revision != "master":
+        url += f"?ref={quote(revision, safe='')}"
+    try:
+        resp = requests.get(url, headers=_header_fill(token), timeout=30)
+        if resp.status_code not in (200, 201):
+            return False, None, None
+        d = resp.json()
+        if d.get("encoding") != "base64" or not d.get("content"):
+            return False, None, None
+        raw = base64.b64decode(d["content"])
+        # An LFS pointer is short UTF-8 text beginning with the spec version line.
+        if len(raw) < 1024 and raw.startswith(b"version https://git-lfs"):
+            text = raw.decode("utf-8", "replace")
+            oid_match = re.search(r"oid sha256:([a-f0-9]{64})", text)
+            size_match = re.search(r"size (\d+)", text)
+            if oid_match:
+                real_size = int(size_match.group(1)) if size_match else d.get("size")
+                return True, oid_match.group(1), real_size
+        return False, None, None
+    except (requests.RequestException, JSONDecodeError, ValueError):
+        return False, None, None
+
+
 def _resolve_repo_paths(files: list[dict], root_items: list[str]) -> list[str]:
     """Resolve correct repo-relative paths from git/trees entries.
 
@@ -339,9 +412,18 @@ def _download_file_with_lfs(
     if expected_sha and dest_dir and _is_cached(dest_dir, file_path, expected_sha):
         return
 
-    # Skip if file exists with matching size (fast fallback)
+    # Resolve authoritative verification info before touching the file. The
+    # media endpoint dereferences LFS objects, so the downloaded bytes are the
+    # real content whose only correct checksum is the LFS oid (sha256); the
+    # git/trees sha/size describe the small pointer and must not be used for it.
+    is_lfs, lfs_oid, lfs_real_size = _fetch_lfs_pointer_info(repo_id, file_path, token, revision)
+    # For an LFS file the real content size is the pointer's size, not the
+    # git/trees size (which is the ~134-byte pointer blob).
+    verify_size = lfs_real_size if is_lfs else expected_size
+
+    # Skip if file exists with matching real size (fast fallback)
     if local_path_obj.exists():
-        if expected_size is not None and local_path_obj.stat().st_size == expected_size:
+        if verify_size is not None and local_path_obj.stat().st_size == verify_size:
             if expected_sha and dest_dir:
                 _mark_cached(dest_dir, file_path, expected_sha)
             return
@@ -359,35 +441,35 @@ def _download_file_with_lfs(
 
     _download_file(url, str(local_path), token, desc=file_path)
 
-    # Check if downloaded file is an LFS pointer
+    # The media endpoint usually returns dereferenced content, but can also hand
+    # back the raw LFS pointer. If we got a pointer, fetch the real content.
     if local_path_obj.stat().st_size < 500:
-        with open(local_path_obj, "r") as f:
+        with open(local_path_obj, "r", errors="replace") as f:
             first_line = f.readline().strip()
         if first_line == "version https://git-lfs.github.com/spec/v1":
-            content = local_path_obj.read_text()
+            content = local_path_obj.read_text(errors="replace")
             oid_match = re.search(r"oid sha256:([a-f0-9]{64})", content)
             size_match = re.search(r"size (\d+)", content)
             if oid_match and size_match:
-                oid = oid_match.group(1)
-                file_size = int(size_match.group(1))
-                _lfs_download_real(repo_id, oid, file_size, token, str(local_path_obj), desc=file_path)
+                is_lfs = True
+                lfs_oid = oid_match.group(1)
+                pointer_size = int(size_match.group(1))
+                _lfs_download_real(repo_id, lfs_oid, pointer_size, token, str(local_path_obj), desc=file_path)
 
-                # Verify LFS content SHA against OID
-                import hashlib
-
-                actual = hashlib.sha256(local_path_obj.read_bytes()).hexdigest()
-                if actual != oid:
-                    local_path_obj.unlink(missing_ok=True)
-                    raise ValueError(f"SHA256 mismatch for {file_path} (LFS content): expected {oid}, got {actual}")
-    else:
-        # Verify regular file SHA against git blob SHA
-        if expected_sha:
-            import hashlib
-
-            actual = hashlib.sha256(local_path_obj.read_bytes()).hexdigest()
-            if actual != expected_sha:
-                local_path_obj.unlink(missing_ok=True)
-                raise ValueError(f"SHA256 mismatch for {file_path}: expected {expected_sha}, got {actual}")
+    # Verify the downloaded content against the correct source hash.
+    if is_lfs and lfs_oid:
+        # LFS content is verified against its oid (sha256 of the real bytes).
+        actual = _sha256_file(local_path_obj)
+        if actual != lfs_oid:
+            local_path_obj.unlink(missing_ok=True)
+            raise ValueError(f"SHA256 mismatch for {file_path} (LFS content): expected {lfs_oid}, got {actual}")
+    elif expected_sha:
+        # A regular file's git/trees sha is the git blob SHA-1, i.e.
+        # sha1("blob <size>\0" + content) — NOT a sha256 of the content.
+        actual = _git_blob_sha1(local_path_obj)
+        if actual != expected_sha:
+            local_path_obj.unlink(missing_ok=True)
+            raise ValueError(f"Git blob SHA-1 mismatch for {file_path}: expected {expected_sha}, got {actual}")
 
     # Mark as cached in manifest
     if expected_sha and dest_dir:
