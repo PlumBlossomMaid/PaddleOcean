@@ -16,6 +16,7 @@ from datetime import timedelta
 from typing import Any, Optional, Union
 
 from ocean.callbacks.callback import Callback
+from ocean.trainer.states import RunningStage
 
 
 def _parse_duration(duration: Union[str, timedelta, dict, None]) -> Optional[float]:
@@ -88,88 +89,84 @@ class Timer(Callback):
         self._interval = interval
         self._verbose = verbose
 
-        # Internal state
-        self._start_time: Optional[float] = None
-        self._training_start_time: Optional[float] = None
-        self._total_train_time: float = 0.0
-        self._epoch_time_start: Optional[float] = None
-
-    @property
-    def start_time(self) -> Optional[float]:
-        return self._start_time
+        # Per-stage wall-clock windows. Training time is measured as one
+        # contiguous window from ``on_train_start`` to ``on_train_end`` (matching
+        # the reference); ``_offset`` carries elapsed training time across a
+        # checkpoint resume so the budget survives restarts.
+        self._start_time: dict[RunningStage, Optional[float]] = dict.fromkeys(RunningStage)
+        self._end_time: dict[RunningStage, Optional[float]] = dict.fromkeys(RunningStage)
+        self._offset: float = 0.0
 
     @property
     def duration(self) -> Optional[float]:
         return self._duration
 
-    @property
-    def total_time(self) -> float:
-        if self._start_time is None:
-            return 0.0
-        return time.time() - self._start_time
+    def start_time(self, stage: Union[str, RunningStage] = RunningStage.TRAINING) -> Optional[float]:
+        """Return the monotonic start time recorded for ``stage`` (or None)."""
+        return self._start_time[RunningStage(stage)]
 
-    @property
-    def time_remaining(self) -> Optional[float]:
+    def end_time(self, stage: Union[str, RunningStage] = RunningStage.TRAINING) -> Optional[float]:
+        """Return the monotonic end time recorded for ``stage`` (or None)."""
+        return self._end_time[RunningStage(stage)]
+
+    def time_elapsed(self, stage: Union[str, RunningStage] = RunningStage.TRAINING) -> float:
+        """Seconds elapsed for ``stage``.
+
+        For training this includes the resume ``_offset``. A still-running stage
+        (start recorded, no end yet) is measured up to ``time.monotonic()``.
+        """
+        stage = RunningStage(stage)
+        start = self._start_time[stage]
+        end = self._end_time[stage]
+        offset = self._offset if stage == RunningStage.TRAINING else 0.0
+        if start is None:
+            return offset
+        if end is None:
+            return time.monotonic() - start + offset
+        return end - start + offset
+
+    def time_remaining(self, stage: Union[str, RunningStage] = RunningStage.TRAINING) -> Optional[float]:
+        """Seconds remaining against ``duration`` for ``stage`` (None if no budget)."""
         if self._duration is None:
             return None
-        elapsed = self.total_time - self._total_train_time
-        return max(0.0, self._duration - elapsed)
-
-    @property
-    def on_training_start_time(self) -> Optional[float]:
-        return self._training_start_time
-
-    @property
-    def training_time(self) -> float:
-        return self._total_train_time
+        return self._duration - self.time_elapsed(stage)
 
     def _check_time_remaining(self, trainer: Any) -> None:
         if self._duration is None:
             return
-        remaining = self.time_remaining
-        if remaining is not None and remaining <= 0:
+        if self.time_elapsed() >= self._duration:
             trainer.should_stop = True
+            if self._verbose:
+                print(f"Timer: training time limit of {self._duration:.0f}s reached, stopping.")
 
     def on_train_start(self, trainer: Any, model: Any) -> None:
-        """Mark start of training phase (ocean-compatible)."""
-        self._training_start_time = time.time()
-        self._epoch_time_start = time.time()
-
-    def on_train_epoch_start(self, trainer: Any, model: Any) -> None:
-        self._epoch_time_start = time.time()
+        self._start_time[RunningStage.TRAINING] = time.monotonic()
 
     def on_train_end(self, trainer: Any, model: Any) -> None:
-        """Accumulate training time (ocean-compatible)."""
-        if self._training_start_time is not None:
-            self._total_train_time += time.time() - self._training_start_time
+        self._end_time[RunningStage.TRAINING] = time.monotonic()
+
+    def on_validation_start(self, trainer: Any, model: Any) -> None:
+        self._start_time[RunningStage.VALIDATING] = time.monotonic()
 
     def on_validation_end(self, trainer: Any, model: Any) -> None:
-        """Reset training timer after validation (ocean-compatible)."""
-        self._training_start_time = time.time()
+        self._end_time[RunningStage.VALIDATING] = time.monotonic()
+
+    def on_test_start(self, trainer: Any, model: Any) -> None:
+        self._start_time[RunningStage.TESTING] = time.monotonic()
 
     def on_test_end(self, trainer: Any, model: Any) -> None:
-        """Reset training timer after testing (ocean-compatible)."""
-        self._training_start_time = time.time()
-
-    # ── Existing hooks ──
+        self._end_time[RunningStage.TESTING] = time.monotonic()
 
     def on_fit_start(self, trainer: Any, model: Any) -> None:
-        if self._start_time is None:
-            self._start_time = time.time()
-            self._training_start_time = 0.0
-
-        # On checkpoint resume, adjust for already elapsed time
-        if self._total_train_time > 0:
-            self._start_time = time.time() - self._total_train_time
-
-        if self._duration is None or not self._verbose:
+        # Check right after (a possibly resumed) state is in place, regardless of
+        # interval, so a run whose budget is already spent stops immediately.
+        if self._duration is None:
             return
-        remaining = self.time_remaining
-        if remaining is not None and remaining > 0:
-            print(f"Timer: Training will be interrupted after {self._duration:.0f} seconds")
-        elif remaining is not None:
-            print("Timer: Time limit reached during checkpoint load")
-            trainer.should_stop = True
+        if self._verbose:
+            remaining = self.time_remaining()
+            if remaining is not None and remaining > 0:
+                print(f"Timer: training will be interrupted after {self._duration:.0f} seconds")
+        self._check_time_remaining(trainer)
 
     def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         if self._interval == "step":
@@ -180,17 +177,14 @@ class Timer(Callback):
             self._check_time_remaining(trainer)
 
     def state_dict(self) -> dict[str, Any]:
-        return {
-            "_start_time": self._start_time,
-            "_total_train_time": self._total_train_time,
-        }
+        return {"time_elapsed": {stage.name: self.time_elapsed(stage) for stage in RunningStage}}
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        self._start_time = state_dict.get("_start_time")
-        self._total_train_time = state_dict.get("_total_train_time", 0.0)
+        time_elapsed = state_dict.get("time_elapsed", {})
+        self._offset = time_elapsed.get(RunningStage.TRAINING.name, 0.0)
 
     def __repr__(self) -> str:
-        remaining = self.time_remaining
+        remaining = self.time_remaining()
         if remaining is not None:
             return f"Timer(duration={self._duration:.0f}s, remaining={remaining:.0f}s)"
         return "Timer(duration=None)"
