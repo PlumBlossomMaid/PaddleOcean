@@ -4,7 +4,7 @@ from ocean.callbacks.callback import Callback
 from ocean.callbacks.checkpoint import ModelCheckpoint
 from ocean.callbacks.device_stats_monitor import DeviceStatsMonitor
 from ocean.callbacks.early_stopping import EarlyStopping
-from ocean.callbacks.finetuning import BackboneFinetuning
+from ocean.callbacks.finetuning import BackboneFinetuning, BaseFinetuning
 from ocean.callbacks.gradient_accumulation_scheduler import GradientAccumulationScheduler
 from ocean.callbacks.lambda_function import LambdaCallback
 from ocean.callbacks.lr_monitor import LearningRateMonitor
@@ -30,6 +30,7 @@ __all__ = [
     "LambdaCallback",
     "PredictionWriter",
     "BackboneFinetuning",
+    "BaseFinetuning",
     "GradientAccumulationScheduler",
     "OnExceptionCheckpoint",
     "ThroughputMonitor",
