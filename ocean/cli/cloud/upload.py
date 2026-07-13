@@ -12,6 +12,8 @@ both ``aistudio-sdk`` and ``baidubce``. Large files are uploaded via
 direct HTTP/REST calls to BOS — no BCE SDK dependency.
 """
 
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
