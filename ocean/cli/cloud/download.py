@@ -8,6 +8,8 @@ Usage:
     ocean cloud download user/repo path/to/file --repo-type model
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
