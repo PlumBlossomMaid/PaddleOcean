@@ -127,10 +127,11 @@ class _TrainingEpochLoop(_Loop):
             should_step = not self._should_accumulate()
 
             kwargs = {"batch": batch, "batch_idx": batch_idx}
-            if model.automatic_optimization:
-                result = self.automatic_optimization.run(trainer.optimizers[0], batch_idx, kwargs, should_step)
-            else:
-                result = self.manual_optimization.run(kwargs)
+            with trainer.profiler.profile("run_training_batch"):
+                if model.automatic_optimization:
+                    result = self.automatic_optimization.run(trainer.optimizers[0], batch_idx, kwargs, should_step)
+                else:
+                    result = self.manual_optimization.run(kwargs)
 
             self.batch_progress.increment_processed()
 
@@ -228,7 +229,8 @@ class _TrainingEpochLoop(_Loop):
                         trainer._results.batch_size = None
                         _call_callback_hooks(trainer, "on_validation_batch_start", batch, batch_idx, dataloader_idx=0)
                         model.on_validation_batch_start(batch, batch_idx)
-                        result = model.validation_step(batch, batch_idx)
+                        with trainer.profiler.profile("[EvaluationLoop].validation_step"):
+                            result = model.validation_step(batch, batch_idx)
                         model.on_validation_batch_end(result, batch, batch_idx)
                         _call_callback_hooks(
                             trainer, "on_validation_batch_end", result, batch, batch_idx, dataloader_idx=0

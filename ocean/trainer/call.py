@@ -3,12 +3,30 @@
 from typing import Any
 
 
+def _get_profiler(trainer: Any) -> Any:
+    """Return the trainer's profiler, or a no-op fallback.
+
+    Callers pass an ``Any`` trainer, so a profiler is not guaranteed to be
+    present (e.g. lightweight test doubles); fall back to a PassThroughProfiler
+    so the ``profile`` context manager is always available.
+    """
+    profiler = getattr(trainer, "profiler", None)
+    if profiler is None:
+        from ocean.profilers import PassThroughProfiler
+
+        profiler = PassThroughProfiler()
+    return profiler
+
+
 def _call_callback_hooks(trainer: Any, hook_name: str, *args: Any, **kwargs: Any) -> None:
     """Call a hook on all callbacks."""
+    profiler = _get_profiler(trainer)
     for cb in getattr(trainer, "callbacks", None) or []:
         fn = getattr(cb, hook_name, None)
         if fn is not None:
-            fn(trainer, trainer._model, *args, **kwargs)
+            state_key = getattr(cb, "state_key", cb.__class__.__name__)
+            with profiler.profile(f"[Callback]{state_key}.{hook_name}"):
+                fn(trainer, trainer._model, *args, **kwargs)
 
 
 def _call_module_hook(trainer: Any, hook_name: str, *args: Any, **kwargs: Any) -> Any:
@@ -21,8 +39,10 @@ def _call_module_hook(trainer: Any, hook_name: str, *args: Any, **kwargs: Any) -
         return None
     # Set the current function name for logging context
     model._current_fx_name = hook_name
+    profiler = _get_profiler(trainer)
     try:
-        return fn(*args, **kwargs)
+        with profiler.profile(f"[Model]{model.__class__.__name__}.{hook_name}"):
+            return fn(*args, **kwargs)
     finally:
         model._current_fx_name = None
 

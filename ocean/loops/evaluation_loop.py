@@ -97,10 +97,11 @@ class _EvaluationLoop(_Loop):
                     step_fn = getattr(model, step_method)
                     # Check if step_method accepts dataloader_idx (backward compat)
                     sig = inspect.signature(step_fn)
-                    if "dataloader_idx" in sig.parameters:
-                        result = step_fn(batch, batch_idx, dataloader_idx=dl_idx)
-                    else:
-                        result = step_fn(batch, batch_idx)
+                    with trainer.profiler.profile(f"[EvaluationLoop].{step_method}"):
+                        if "dataloader_idx" in sig.parameters:
+                            result = step_fn(batch, batch_idx, dataloader_idx=dl_idx)
+                        else:
+                            result = step_fn(batch, batch_idx)
                     _call_module_hook(trainer, batch_end_hook, result, batch, batch_idx, dl_idx)
                     _call_callback_hooks(trainer, batch_end_hook, result, batch, batch_idx, dl_idx)
 

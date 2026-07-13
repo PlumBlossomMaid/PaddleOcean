@@ -190,6 +190,12 @@ class Trainer:
         self.verbose = verbose
         self.inference_mode = inference_mode
         self.use_distributed_sampler = use_distributed_sampler
+        # Default to a no-op profiler so every ``trainer.profiler.profile(...)``
+        # call site is always valid without a None guard.
+        if profiler is None:
+            from ocean.profilers import PassThroughProfiler
+
+            profiler = PassThroughProfiler()
         self.profiler = profiler
         self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
         self.detect_anomaly = detect_anomaly
@@ -491,6 +497,10 @@ class Trainer:
         # Attach data
         self._data_connector.attach_data(model, train_dataloaders, val_dataloaders, datamodule=datamodule)
 
+        # Profiler setup — records the stage/rank so describe() can label its
+        # report; a no-op for PassThroughProfiler.
+        self.profiler.setup(stage=self.state.fn, local_rank=getattr(self.strategy, "local_rank", 0))
+
         # Strategy setup
         self.strategy.connect(model)
         self.strategy.setup_environment()
@@ -601,7 +611,12 @@ class Trainer:
         self._results = _ResultCollection(training=False, fork_names=False)
         self._log_metrics_on_epoch.clear()
         self.validate_loop.verbose = verbose
-        return self.validate_loop.run()
+        self.profiler.setup(stage=self.state.fn, local_rank=getattr(self.strategy, "local_rank", 0))
+        try:
+            return self.validate_loop.run()
+        finally:
+            self.profiler.describe()
+            self.profiler.teardown()
 
     def test(
         self,
@@ -629,7 +644,12 @@ class Trainer:
 
         self._results = _ResultCollection(training=False, fork_names=False)
         self._log_metrics_on_epoch.clear()
-        return self.test_loop.run()
+        self.profiler.setup(stage=self.state.fn, local_rank=getattr(self.strategy, "local_rank", 0))
+        try:
+            return self.test_loop.run()
+        finally:
+            self.profiler.describe()
+            self.profiler.teardown()
 
     def predict(
         self,
@@ -656,7 +676,12 @@ class Trainer:
         self._model.to(device)
 
         self.predict_loop.return_predictions = return_predictions
-        return self.predict_loop.run()
+        self.profiler.setup(stage=self.state.fn, local_rank=getattr(self.strategy, "local_rank", 0))
+        try:
+            return self.predict_loop.run()
+        finally:
+            self.profiler.describe()
+            self.profiler.teardown()
 
     # ====================================================================
     # Save / Load checkpoint
@@ -664,8 +689,9 @@ class Trainer:
 
     def save_checkpoint(self, filepath: str, weights_only: bool = False) -> None:
         """Save a checkpoint to filepath."""
-        checkpoint = self._checkpoint_connector.dump_checkpoint(weights_only)
-        self.strategy.save_checkpoint(checkpoint, filepath)
+        with self.profiler.profile("save_checkpoint"):
+            checkpoint = self._checkpoint_connector.dump_checkpoint(weights_only)
+            self.strategy.save_checkpoint(checkpoint, filepath)
 
     # ====================================================================
     # Logging
@@ -972,6 +998,9 @@ class Trainer:
             self._results = prev_results
 
     def _teardown(self) -> None:
+        # Emit the profiler report (rank zero) before tearing down its buffers.
+        self.profiler.describe()
+        self.profiler.teardown()
         self.strategy.teardown()
         self._signal_connector.teardown()
         self.fit_loop.teardown()
