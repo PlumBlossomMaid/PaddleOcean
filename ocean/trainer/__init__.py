@@ -207,6 +207,7 @@ class Trainer:
         self._optimizer_step: int = 0
         self.optimizers: list = []
         self._lr_schedulers: list = []
+        self._tuner: Optional[Any] = None
         self.should_stop: bool = False
 
         # === Model & Data ===
@@ -657,6 +658,87 @@ class Trainer:
 
         self.predict_loop.return_predictions = return_predictions
         return self.predict_loop.run()
+
+    # ====================================================================
+    # Tuning
+    # ====================================================================
+
+    @property
+    def tuner(self) -> Any:
+        """Lazily-constructed :class:`~ocean.tuner.Tuner` bound to this trainer."""
+        if self._tuner is None:
+            from ocean.tuner import Tuner
+
+            self._tuner = Tuner(self)
+        return self._tuner
+
+    def _attach_model_for_tune(self, model: Any) -> None:
+        """Attach a model and resolve its optimizers so a finder can run standalone."""
+        self._model = model
+        model._trainer = self
+        device = self._resolve_device()
+        model.to(device)
+        if not self.optimizers:
+            self.optimizers = self._resolve_optimizers(model)
+            if self.optimizers:
+                self.strategy._optimizers = [o._optimizer for o in self.optimizers]
+
+    def scale_batch_size(
+        self,
+        model: Any,
+        train_dataloader: Any,
+        min_batch_size: int = 2,
+        max_batch_size: int = 512,
+        steps_per_trial: int = 3,
+    ) -> int:
+        """Find the largest batch size that fits in device memory.
+
+        Runs real forward/backward/step trials; the model and optimizer state are
+        restored afterwards so tuning does not corrupt the weights.
+        """
+        self._attach_model_for_tune(model)
+        return self.tuner.tune_batch_size(
+            model,
+            train_dataloader,
+            min_batch_size=min_batch_size,
+            max_batch_size=max_batch_size,
+            steps_per_trial=steps_per_trial,
+        )
+
+    def lr_find(
+        self,
+        model: Any,
+        train_dataloader: Any,
+        min_lr: float = 1e-8,
+        max_lr: float = 1.0,
+        num_steps: int = 100,
+    ) -> float:
+        """Find a good learning rate via an exponential LR range test.
+
+        The diagnostic training is rolled back so the real weights are untouched.
+        """
+        self._attach_model_for_tune(model)
+        return self.tuner.lr_find(model, train_dataloader, min_lr=min_lr, max_lr=max_lr, num_steps=num_steps)
+
+    def tune(
+        self,
+        model: Any,
+        train_dataloader: Any,
+        lr_find: bool = True,
+        scale_batch_size: bool = False,
+    ) -> dict[str, Any]:
+        """Run the requested finders and return their results.
+
+        By default runs the learning-rate finder only; enable ``scale_batch_size``
+        to also search for the largest batch size. Batch size is scaled first so
+        the LR finder runs against the tuned batch size.
+        """
+        results: dict[str, Any] = {}
+        if scale_batch_size:
+            results["batch_size"] = self.scale_batch_size(model, train_dataloader)
+        if lr_find:
+            results["lr"] = self.lr_find(model, train_dataloader)
+        return results
 
     # ====================================================================
     # Save / Load checkpoint
