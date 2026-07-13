@@ -1,12 +1,15 @@
 """Batch size finder callback - finds max batch size that fits in memory."""
 
-from typing import Any
-
 from ocean.callbacks.callback import Callback
 
 
 class BatchSizeFinder(Callback):
     """Find the maximum batch size that fits in memory.
+
+    The actual search is performed by the Tuner (``trainer.scale_batch_size`` /
+    ``trainer.tune``), which snapshots and restores model state so it does not
+    corrupt the weights. This callback only records the search configuration and
+    the resulting batch size.
 
     Args:
         mode: 'power' (double each trial) or 'binsearch'.
@@ -27,11 +30,3 @@ class BatchSizeFinder(Callback):
         self.init_val = init_val
         self.max_trials = max_trials
         self.optimal_batch_size: int = init_val
-
-    def on_fit_start(self, trainer: Any, model: Any) -> None:
-        self._original_limit = trainer.limit_train_batches
-        trainer.limit_train_batches = self.steps_per_trial
-
-    def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
-        # Simplified: scale batch size logic is handled by Tuner
-        pass

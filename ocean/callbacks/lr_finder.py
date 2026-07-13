@@ -38,21 +38,27 @@ class LRFinder(Callback):
         self.optimal_lr: Optional[float] = None
         self._step = 0
         self._best_loss = float("inf")
+        self._original_lr: Optional[float] = None
+
+    def on_train_start(self, trainer: Any, model: Any) -> None:
+        # Remember the learning rate so the range test can be rolled back: the
+        # test ramps the LR across real training steps, and without restoring it
+        # the model would keep training at the last (largest) probed LR.
+        self._original_lr = self._get_lr(trainer)
 
     def on_train_batch_start(self, trainer: Any, model: Any, batch: Any, batch_idx: int) -> None:
         if self._step >= self.num_training_steps:
             return
 
         # Compute current LR
+        ratio = self._step / max(self.num_training_steps - 1, 1)
         if self.mode == "exponential":
-            ratio = self._step / max(self.num_training_steps - 1, 1)
             lr = self.min_lr * (self.max_lr / self.min_lr) ** ratio
         else:
-            ratio = self._step / max(self.num_training_steps - 1, 1)
             lr = self.min_lr + (self.max_lr - self.min_lr) * ratio
 
         # Set LR
-        self._set_lr(model, lr)
+        self._set_lr(trainer, lr)
         self._step += 1
 
     def on_train_batch_end(self, trainer: Any, model: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
@@ -67,7 +73,7 @@ class LRFinder(Callback):
             self._best_loss = min(self._best_loss, loss_val)
 
             # Current LR
-            lr = self._get_lr(model)
+            lr = self._get_lr(trainer)
             self.results.append((lr, loss_val))
 
             # Early stop
@@ -80,13 +86,28 @@ class LRFinder(Callback):
                 else:
                     self.optimal_lr = lr * 0.1
 
-    def _set_lr(self, model: Any, lr: float) -> None:
-        opt = model._optimizer
-        if opt is not None and hasattr(opt, "_learning_rate"):
-            opt._learning_rate = lr
+    def on_train_end(self, trainer: Any, model: Any) -> None:
+        # Restore the learning rate the run started with so the diagnostic ramp
+        # does not leave the optimizer stuck at the final probed value.
+        if self._original_lr is not None:
+            self._set_lr(trainer, self._original_lr)
 
-    def _get_lr(self, model: Any) -> float:
-        opt = model._optimizer
-        if opt is not None and hasattr(opt, "_learning_rate"):
-            return float(opt._learning_rate)
-        return 0.001
+    def _optimizers(self, trainer: Any) -> list:
+        return getattr(trainer, "optimizers", None) or []
+
+    def _set_lr(self, trainer: Any, lr: float) -> None:
+        for opt in self._optimizers(trainer):
+            raw = getattr(opt, "_optimizer", opt)
+            try:
+                raw.set_lr(lr)
+            except Exception:
+                pass
+
+    def _get_lr(self, trainer: Any) -> Optional[float]:
+        for opt in self._optimizers(trainer):
+            raw = getattr(opt, "_optimizer", opt)
+            try:
+                return float(raw.get_lr())
+            except Exception:
+                continue
+        return None
