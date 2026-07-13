@@ -25,7 +25,8 @@ class _PredictionLoop(_Loop):
             for batch_idx, batch in enumerate(dataloader):
                 _call_callback_hooks(trainer, "on_predict_batch_start", batch, batch_idx, dl_idx)
                 batch = trainer._move_to_device(batch, trainer._resolve_device())
-                pred = model.predict_step(batch)
+                with trainer.profiler.profile("[PredictionLoop].predict_step"):
+                    pred = model.predict_step(batch)
                 predictions.append(pred)
                 _call_callback_hooks(trainer, "on_predict_batch_end", pred, batch, batch_idx, dl_idx)
             _call_callback_hooks(trainer, "on_predict_epoch_end")

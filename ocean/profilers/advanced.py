@@ -3,17 +3,19 @@
 Advanced profiler with per-action cProfile stats.
 """
 
-import time
-from collections import defaultdict
 from typing import Any, Optional
 
 import paddle
 
+from ocean.profilers.base import Profiler
 
-class AdvancedProfiler:
+
+class AdvancedProfiler(Profiler):
     """Advanced profiler using paddle.profiler.
 
-    Records execution time and FLOPs for training steps.
+    Records execution time and FLOPs for training steps. Inherits the
+    :meth:`profile` context manager, :meth:`setup` and :meth:`describe` from
+    :class:`Profiler`.
 
     Args:
         dirpath: Directory to save profiling traces.
@@ -21,20 +23,11 @@ class AdvancedProfiler:
     """
 
     def __init__(self, dirpath: str = ".", filename: str = "profile.json") -> None:
+        super().__init__()
         self.dirpath = dirpath
         self.filename = filename
-        self._records: dict[str, list[float]] = defaultdict(list)
-        self._start_times: dict[str, float] = {}
         self._profiler: Optional[Any] = None
         self._enabled = False
-
-    def start(self, action_name: str) -> None:
-        self._start_times[action_name] = time.perf_counter()
-
-    def stop(self, action_name: str) -> None:
-        if action_name in self._start_times:
-            elapsed = time.perf_counter() - self._start_times.pop(action_name)
-            self._records[action_name].append(elapsed)
 
     def start_profile(self) -> None:
         """Start the Paddle profiler for detailed tracing."""
@@ -74,4 +67,4 @@ class AdvancedProfiler:
 
     def teardown(self) -> None:
         self.stop_profile()
-        self._records.clear()
+        super().teardown()

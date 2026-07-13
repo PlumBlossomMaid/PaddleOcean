@@ -127,7 +127,8 @@ class _FitLoop(_Loop):
             _call_module_hook(trainer, "on_train_epoch_start")
             _call_callback_hooks(trainer, "on_train_epoch_start")
 
-            self.epoch_loop.run()
+            with trainer.profiler.profile("run_training_epoch"):
+                self.epoch_loop.run()
 
             trainer._compute_epoch_metrics()
             _call_module_hook(trainer, "on_train_epoch_end")
