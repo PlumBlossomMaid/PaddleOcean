@@ -235,9 +235,8 @@ class _CheckpointConnector:
         if not weights_only:
             if "optimizer_states" not in ckpt:
                 raise KeyError("Trying to restore optimizer state but checkpoint contains only the model.")
-            opt = self.trainer.optimizers[0]._optimizer
-            if opt is not None and ckpt["optimizer_states"]:
-                opt.set_state_dict(ckpt["optimizer_states"][0])
+            for opt, state in zip(self.trainer.optimizers, ckpt["optimizer_states"]):
+                opt._optimizer.set_state_dict(state)
 
             if "lr_schedulers" not in ckpt:
                 raise KeyError(
@@ -311,9 +310,7 @@ class _CheckpointConnector:
             "state_dict": model.state_dict(),
         }
         if not weights_only and self.trainer.optimizers:
-            raw_opt = self.trainer.optimizers[0]._optimizer
-            if raw_opt is not None:
-                checkpoint["optimizer_states"] = [raw_opt.state_dict()]
+            checkpoint["optimizer_states"] = [o._optimizer.state_dict() for o in self.trainer.optimizers]
 
         loop_state = self.trainer.fit_loop.state_dict()
         if loop_state:

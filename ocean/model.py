@@ -357,6 +357,41 @@ class Model(nn.Layer):
         """Backward in manual optimization (ocean-compatible)."""
         loss.backward(*args, **kwargs)
 
+    def optimizers(self) -> Any:
+        """Return the optimizer(s) being used during training.
+
+        For manual optimization, returns the wrapped OceanOptimizer(s) so that
+        ``trainer.optimizer_step`` advances correctly and AMP/GradScaler
+        semantics are preserved.  Returns a single optimizer when only one is
+        present, or a list when multiple optimizers are configured.
+
+        Aligns with Lightning's ``LightningModule.optimizers()``.
+        """
+        if self._trainer is None:
+            raise RuntimeError("optimizers() called outside of training context")
+        opts = self._trainer.optimizers
+        if isinstance(opts, list) and len(opts) == 1:
+            return opts[0]
+        return opts
+
+    def lr_schedulers(self) -> Any:
+        """Return the LR scheduler(s) being used during training.
+
+        Returns ``None`` when no schedulers are configured, a single scheduler
+        when only one is present, or a list for multiple schedulers.
+
+        Aligns with Lightning's ``LightningModule.lr_schedulers()``.
+        """
+        if self._trainer is None:
+            raise RuntimeError("lr_schedulers() called outside of training context")
+        configs = self._trainer._lr_schedulers
+        if not configs:
+            return None
+        schedulers = [cfg["scheduler"] for cfg in configs]
+        if len(schedulers) == 1:
+            return schedulers[0]
+        return schedulers
+
     def freeze(self) -> None:
         """Freeze all parameters."""
         for p in self.parameters():
