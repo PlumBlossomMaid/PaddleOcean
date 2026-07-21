@@ -536,8 +536,14 @@ class Trainer:
         self.optimizers = self._resolve_optimizers(model)
         if self.optimizers:
             self.strategy._optimizers = [o._optimizer for o in self.optimizers]
+            precision_plugin = getattr(self.strategy, "_precision_plugin", None)
             for o in self.optimizers:
                 o._on_after_step = lambda: self._advance_optimizer_step()
+                # Manual-mode steps route through the precision plugin so AMP
+                # GradScaler.step/update unwind scaled gradients. Automatic mode
+                # steps optimizers via the loop, not this hook, so this is inert there.
+                if not model.automatic_optimization:
+                    o._precision_plugin = precision_plugin
 
         # Attach model callbacks BEFORE restoring, so a checkpoint's callback
         # state is applied to model-defined callbacks (from configure_callbacks())

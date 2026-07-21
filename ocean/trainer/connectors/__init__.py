@@ -452,8 +452,11 @@ class _AcceleratorConnector:
         # Inject accelerator & devices into strategy
         self._strategy.accelerator = self._accelerator
         self._strategy.parallel_devices = self._parallel_devices
-        # Resolve precision
+        # Resolve precision and inject the plugin into the strategy — without
+        # this the strategy keeps its default no-op Precision and "16-mixed"
+        # never activates (no auto_cast, no GradScaler).
         self._precision = self._resolve_precision(precision)
+        self._strategy._precision_plugin = self._precision
         self._set_flags(deterministic, benchmark)
 
     @property
