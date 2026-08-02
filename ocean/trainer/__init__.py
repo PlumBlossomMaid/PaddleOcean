@@ -37,6 +37,8 @@ from ocean.trainer.connectors import (
 )
 from ocean.trainer.connectors.logger_connector import _ResultCollection
 from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerStatus
+from ocean.utils import MisconfigurationException
+from ocean.utils.data import sized_len
 
 
 def _patch_ddp_attr_forward(ddp_model: paddle.nn.Layer) -> None:
@@ -932,14 +934,38 @@ class Trainer:
             return {k: self._move_to_device(v, device) for k, v in batch.items()}
         return batch
 
-    def _resolve_limit(self, loader: Any, limit: Union[int, float]) -> int:
-        try:
-            total = len(loader)
-        except (TypeError, AttributeError):
-            return int(limit) if isinstance(limit, (int, float)) else 100
+    def _resolve_limit(self, loader: Any, limit: Union[int, float], stage: str = "train") -> Union[int, float]:
+        """Resolve ``limit_*_batches`` against a loader into a batch count.
+
+        A loader without a length (streaming ``IterableDataset``) has an
+        unknown number of batches, which is represented as ``float("inf")``:
+        the loop then runs until the iterator is exhausted. A *fractional*
+        limit is meaningless in that case — there is no total to take a
+        fraction of — so anything but the default ``1.0`` is rejected up front
+        instead of silently training on an invented batch count.
+        """
+        total = sized_len(loader)
+        length: Union[int, float] = float("inf") if total is None else total
+        if length == 0:
+            return 0
+
         if isinstance(limit, int):
-            return min(limit, total)
-        return min(int(total * limit), total)
+            return min(length, limit)
+        if length != float("inf"):
+            num_batches = int(length * limit)
+            if num_batches == 0 and limit > 0.0:
+                raise MisconfigurationException(
+                    f"You requested to check {limit} of the {stage} dataloader but {limit} * {length} < 1. "
+                    f"Please increase the `limit_{stage}_batches` argument. Try at least "
+                    f"`limit_{stage}_batches={1.0 / length}`."
+                )
+            return num_batches
+        if limit != 1.0:
+            raise MisconfigurationException(
+                f"When using an `IterableDataset`, `Trainer(limit_{stage}_batches)` must be `1.0` or an int. "
+                f"An int specifies `num_{stage}_batches` to use."
+            )
+        return length
 
     def _print(self, msg: str) -> None:
         """Print a message to console only on rank 0."""
@@ -974,6 +1000,19 @@ class Trainer:
 
         if max_batches == 0:
             self.val_check_batch = 0
+            return
+
+        if max_batches == float("inf") and not isinstance(interval, int):
+            # No epoch length to take a fraction of. ``1.0`` means "once per
+            # epoch", which for a streaming loader is decided by exhaustion,
+            # not by a batch index — so never trigger mid-epoch.
+            if interval != 1.0:
+                raise MisconfigurationException(
+                    "When using an `IterableDataset` for the train dataloader, `Trainer(val_check_interval)` "
+                    "must be time based, `1.0`, or an int. An int k specifies checking validation every k "
+                    "training batches."
+                )
+            self.val_check_batch = float("inf")
             return
 
         if isinstance(interval, int):
