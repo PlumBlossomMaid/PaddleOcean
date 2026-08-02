@@ -357,7 +357,8 @@ class Model(nn.Layer):
         """Backward in manual optimization (ocean-compatible).
 
         Routes through the strategy/precision plugin so AMP GradScaler scaling
-        is applied (mirrors Lightning's ``manual_backward`` → ``strategy.backward``).
+        is applied, matching the reference behavior of dispatching the backward
+        through the strategy.
         Falls back to a plain ``loss.backward()`` when no trainer/strategy is
         attached (e.g. unit tests calling the model directly).
         """
@@ -377,8 +378,8 @@ class Model(nn.Layer):
 
         Call from ``training_step`` after ``manual_backward`` and before
         ``optimizer.step()``. Under AMP the gradients are unscaled first, so the
-        clip threshold applies to the true (unscaled) gradient (mirrors
-        Lightning's ``self.clip_gradients``). ``optimizer`` may be an
+        clip threshold applies to the true (unscaled) gradient. ``optimizer``
+        may be an
         ``OceanOptimizer`` wrapper or a raw Paddle optimizer.
 
         Args:
@@ -408,8 +409,6 @@ class Model(nn.Layer):
         ``trainer.optimizer_step`` advances correctly and AMP/GradScaler
         semantics are preserved.  Returns a single optimizer when only one is
         present, or a list when multiple optimizers are configured.
-
-        Aligns with Lightning's ``LightningModule.optimizers()``.
         """
         if self._trainer is None:
             raise RuntimeError("optimizers() called outside of training context")
@@ -423,8 +422,6 @@ class Model(nn.Layer):
 
         Returns ``None`` when no schedulers are configured, a single scheduler
         when only one is present, or a list for multiple schedulers.
-
-        Aligns with Lightning's ``LightningModule.lr_schedulers()``.
         """
         if self._trainer is None:
             raise RuntimeError("lr_schedulers() called outside of training context")

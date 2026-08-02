@@ -29,8 +29,9 @@ class OceanOptimizer:
     def step(self, closure: Optional[Any] = None) -> None:
         self._on_before_step()
         if self._precision_plugin is not None:
-            # Mirrors Lightning's LightningOptimizer.step → strategy.optimizer_step,
-            # so AMP scaling is unwound (scaler.step + scaler.update) on manual steps.
+            # Routes the update through the plugin, matching the reference
+            # behavior, so AMP scaling is unwound (scaler.step + scaler.update)
+            # on manual steps.
             self._precision_plugin.optimizer_step(self._optimizer)
         elif closure is not None:
             self._optimizer.step(closure)
