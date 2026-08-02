@@ -4,12 +4,14 @@ Manages prepare_data/setup/teardown
 and provides dataloader factory methods.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 import paddle
 
+from ocean.core.mixins import HyperparametersMixin
 
-class DataModule:
+
+class DataModule(HyperparametersMixin):
     """A DataModule standardizes data splits, preparation and transforms.
 
     Example::
@@ -32,7 +34,21 @@ class DataModule:
     allow_zero_length_dataloader_with_multiple_devices: bool = False
 
     def __init__(self) -> None:
+        super().__init__()
         self.trainer: Optional["Trainer"] = None  # noqa: F821
+
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path: str,
+        map_location: Optional[str] = None,
+        strict: bool = True,
+        **kwargs: Any,
+    ) -> "DataModule":
+        """Build a datamodule from the hyperparameters stored in a checkpoint."""
+        from ocean.core.saving import load_from_checkpoint as _load_from_checkpoint
+
+        return _load_from_checkpoint(cls, checkpoint_path, map_location=map_location, strict=strict, **kwargs)
 
     def prepare_data(self) -> None:
         """Download and prepare data. Called only once (on rank 0)."""

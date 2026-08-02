@@ -272,7 +272,8 @@ class ModelCheckpoint(Callback):
                         checkpoint[type(trainer.datamodule).__qualname__] = ds
 
             if hasattr(model, "hparams") and model.hparams:
-                checkpoint["hyper_parameters"] = model.hparams
+                # Plain dict: paddle.save rejects dict subclasses like AttributeDict.
+                checkpoint["hyper_parameters"] = dict(model.hparams)
 
             callback_states = {}
             for cb in trainer.callbacks if trainer else []:
