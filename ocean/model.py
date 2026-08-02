@@ -354,8 +354,53 @@ class Model(nn.Layer):
             scheduler.step()
 
     def manual_backward(self, loss: paddle.Tensor, *args: Any, **kwargs: Any) -> None:
-        """Backward in manual optimization (ocean-compatible)."""
-        loss.backward(*args, **kwargs)
+        """Backward in manual optimization (ocean-compatible).
+
+        Routes through the strategy/precision plugin so AMP GradScaler scaling
+        is applied, matching the reference behavior of dispatching the backward
+        through the strategy.
+        Falls back to a plain ``loss.backward()`` when no trainer/strategy is
+        attached (e.g. unit tests calling the model directly).
+        """
+        trainer = self._trainer
+        if trainer is not None and trainer.strategy is not None:
+            trainer.strategy.backward(loss, *args, **kwargs)
+        else:
+            loss.backward(*args, **kwargs)
+
+    def clip_gradients(
+        self,
+        optimizer: Any,
+        gradient_clip_val: Optional[float] = None,
+        gradient_clip_algorithm: Optional[str] = None,
+    ) -> None:
+        """Clip gradients in manual optimization.
+
+        Call from ``training_step`` after ``manual_backward`` and before
+        ``optimizer.step()``. Under AMP the gradients are unscaled first, so the
+        clip threshold applies to the true (unscaled) gradient. ``optimizer``
+        may be an
+        ``OceanOptimizer`` wrapper or a raw Paddle optimizer.
+
+        Args:
+            optimizer: The optimizer whose parameters' gradients are clipped.
+            gradient_clip_val: Max norm/value; ``None`` or ``<=0`` is a no-op.
+            gradient_clip_algorithm: ``"norm"`` (default) or ``"value"``.
+        """
+        if gradient_clip_val is None or gradient_clip_val <= 0:
+            return
+        algorithm = (gradient_clip_algorithm or "norm").lower()
+
+        raw_opt = getattr(optimizer, "_optimizer", optimizer)
+        trainer = self._trainer
+        if trainer is not None and trainer.strategy is not None:
+            # Unscale before clipping when AMP GradScaler is active (no-op otherwise).
+            trainer.strategy.precision_plugin.unscale_gradients(raw_opt)
+
+        if algorithm == "value":
+            paddle.nn.utils.clip_grad_value_(self.parameters(), gradient_clip_val)
+        else:
+            paddle.nn.utils.clip_grad_norm_(self.parameters(), gradient_clip_val)
 
     def optimizers(self) -> Any:
         """Return the optimizer(s) being used during training.
@@ -364,8 +409,6 @@ class Model(nn.Layer):
         ``trainer.optimizer_step`` advances correctly and AMP/GradScaler
         semantics are preserved.  Returns a single optimizer when only one is
         present, or a list when multiple optimizers are configured.
-
-        Aligns with Lightning's ``LightningModule.optimizers()``.
         """
         if self._trainer is None:
             raise RuntimeError("optimizers() called outside of training context")
@@ -379,8 +422,6 @@ class Model(nn.Layer):
 
         Returns ``None`` when no schedulers are configured, a single scheduler
         when only one is present, or a list for multiple schedulers.
-
-        Aligns with Lightning's ``LightningModule.lr_schedulers()``.
         """
         if self._trainer is None:
             raise RuntimeError("lr_schedulers() called outside of training context")

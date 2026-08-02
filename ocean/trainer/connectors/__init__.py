@@ -452,8 +452,16 @@ class _AcceleratorConnector:
         # Inject accelerator & devices into strategy
         self._strategy.accelerator = self._accelerator
         self._strategy.parallel_devices = self._parallel_devices
-        # Resolve precision
+        # Resolve precision and inject the plugin into the strategy — without
+        # this the strategy keeps its default no-op Precision and "16-mixed"
+        # never activates (no auto_cast, no GradScaler). A plugin explicitly
+        # set on a user-provided Strategy instance takes precedence.
         self._precision = self._resolve_precision(precision)
+        from ocean.plugins.precision.precision import Precision as _BasePrecision
+
+        current = getattr(self._strategy, "_precision_plugin", None)
+        if current is None or type(current) is _BasePrecision:
+            self._strategy._precision_plugin = self._precision
         self._set_flags(deterministic, benchmark)
 
     @property

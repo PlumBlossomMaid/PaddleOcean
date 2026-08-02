@@ -18,6 +18,9 @@ class OceanOptimizer:
         self._optimizer = optimizer
         self._on_before_step = lambda: None
         self._on_after_step = lambda: None
+        # Set by the trainer so manual-mode ``step()`` routes the update through
+        # the precision plugin (AMP GradScaler.step/update). None → raw step.
+        self._precision_plugin: Optional[Any] = None
 
     @property
     def optimizer(self) -> paddle.optimizer.Optimizer:
@@ -25,7 +28,12 @@ class OceanOptimizer:
 
     def step(self, closure: Optional[Any] = None) -> None:
         self._on_before_step()
-        if closure is not None:
+        if self._precision_plugin is not None:
+            # Routes the update through the plugin, matching the reference
+            # behavior, so AMP scaling is unwound (scaler.step + scaler.update)
+            # on manual steps.
+            self._precision_plugin.optimizer_step(self._optimizer)
+        elif closure is not None:
             self._optimizer.step(closure)
         else:
             self._optimizer.step()
