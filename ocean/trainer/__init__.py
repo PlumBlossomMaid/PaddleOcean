@@ -255,6 +255,12 @@ class Trainer:
             val_check_interval, reload_dataloaders_every_n_epochs, check_val_every_n_epoch
         )
         self._logger_connector.on_trainer_init(logger, log_every_n_steps)
+        if self.fast_dev_run:
+            # Suppress logging for the debug run, but keep ``trainer.logger``
+            # usable so user code touching it still runs.
+            from ocean.loggers.dummy import DummyLogger
+
+            self.loggers = [DummyLogger()] if self.loggers else []
         self._callback_connector.on_trainer_init(
             callbacks, enable_checkpointing, enable_progress_bar, self.default_root_dir, max_time
         )
@@ -487,13 +493,6 @@ class Trainer:
         from ocean.utilities.compile import _verify_strategy_supports_compile
 
         _verify_strategy_supports_compile(model, self.strategy)
-
-        # Fast dev run
-        if self.fast_dev_run:
-            n = self.fast_dev_run if isinstance(self.fast_dev_run, int) else 1
-            self.limit_train_batches = n
-            self.limit_val_batches = n
-            self.num_sanity_val_steps = 0
 
         # Attach data
         self._data_connector.attach_data(model, train_dataloaders, val_dataloaders, datamodule=datamodule)
