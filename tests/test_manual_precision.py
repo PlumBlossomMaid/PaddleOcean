@@ -189,7 +189,7 @@ def test_manual_clip_gradients_unscales():
                 for p in self.parameters():
                     if p.grad is not None:
                         total += (p.grad.astype("float32") ** 2).sum()
-                captured["post_clip"] = float(total.sqrt())
+                captured["post_clip"] = total.sqrt().item()
             opt_g.step()
 
             loss_d = -self.disc(self.gen(batch).detach().astype("float32")).mean()
