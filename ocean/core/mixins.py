@@ -25,13 +25,17 @@ class AttributeDict(dict):
 class HyperparametersMixin:
     """Mixin that provides hparams property and save_hyperparameters method."""
 
-    def __init__(self) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Cooperative: this mixin sits ahead of ``paddle.nn.Layer`` in the MRO,
+        # and ``Layer.__setattr__`` needs the machinery built by ``Layer.__init__``
+        # before any attribute can be assigned — so delegate first, assign after.
+        super().__init__(*args, **kwargs)
         self._hparams: Optional[AttributeDict] = None
         self._hparams_initial: Optional[dict[str, Any]] = None
 
     @property
     def hparams(self) -> AttributeDict:
-        if self._hparams is None:
+        if getattr(self, "_hparams", None) is None:
             self._hparams = AttributeDict()
         return self._hparams
 
@@ -41,7 +45,7 @@ class HyperparametersMixin:
 
     @property
     def hparams_initial(self) -> dict[str, Any]:
-        if self._hparams_initial is None:
+        if getattr(self, "_hparams_initial", None) is None:
             return {}
         return deepcopy(self._hparams_initial)
 

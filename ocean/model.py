@@ -21,8 +21,11 @@ from typing import Any, Callable, Optional, Sequence, Union
 import paddle
 from paddle import nn
 
+from ocean.core.mixins import HyperparametersMixin
+from ocean.core.saving import CHECKPOINT_HYPER_PARAMS_KEY
 
-class Model(nn.Layer):
+
+class Model(HyperparametersMixin, nn.Layer):
     """Dual-mode model: Keras (via model) or Ocean (via hooks).
 
     Args:
@@ -571,6 +574,10 @@ class Model(nn.Layer):
         state["epoch"] = self.current_epoch
         state["dataloader_step"] = self.dataloader_step
         state["optimizer_step"] = self._trainer.optimizer_step if self._trainer else 0
+        # Store the hyperparameters so ``load_from_checkpoint`` can rebuild the
+        # model with the architecture it was trained with.
+        if self.hparams_initial:
+            state[CHECKPOINT_HYPER_PARAMS_KEY] = dict(self.hparams_initial)
         paddle.save(state, path)
 
     def load_checkpoint(
@@ -590,14 +597,40 @@ class Model(nn.Layer):
             The full checkpoint dictionary.
         """
         checkpoint = paddle.load(path)
-        if strict:
-            self.set_state_dict(checkpoint["state_dict"])
-        else:
-            self.set_dict(checkpoint["state_dict"])
+        # ``set_dict`` is an alias of ``set_state_dict`` in Paddle, so the two
+        # cannot express strictness — compare the reported key mismatches.
+        missing, unexpected = self.set_state_dict(checkpoint["state_dict"])
+        if strict and (missing or unexpected):
+            raise RuntimeError(
+                f"Error(s) in loading state_dict for {type(self).__name__}:\n"
+                f"\tMissing key(s) in state_dict: {sorted(missing)}\n"
+                f"\tUnexpected key(s) in state_dict: {sorted(unexpected)}\n"
+                "Pass `strict=False` to load anyway."
+            )
         if load_optimizer and "optimizer" in checkpoint and self._optimizer is not None:
             self._optimizer.set_state_dict(checkpoint["optimizer"])
         # Restore training state
         return checkpoint
+
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path: str,
+        map_location: Optional[str] = None,
+        strict: bool = True,
+        **kwargs: Any,
+    ) -> "Model":
+        """Build a model from a checkpoint and restore its weights.
+
+        Unlike :meth:`load_checkpoint` (which loads into an existing instance),
+        this constructs the instance from the hyperparameters stored in the
+        checkpoint — so the model must have called :meth:`save_hyperparameters`
+        for its ``__init__`` arguments to be restored. ``**kwargs`` override
+        the stored values.
+        """
+        from ocean.core.saving import load_from_checkpoint as _load_from_checkpoint
+
+        return _load_from_checkpoint(cls, checkpoint_path, map_location=map_location, strict=strict, **kwargs)
 
     # ====================================================================
     # Keras-mode convenience methods

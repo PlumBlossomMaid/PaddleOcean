@@ -1,8 +1,41 @@
-"""Checkpoint saving/loading utilities for Model."""
+"""Checkpoint saving/loading utilities for Model and DataModule."""
 
+from __future__ import annotations
+
+import inspect
 from typing import Any, Optional
 
 import paddle
+
+CHECKPOINT_HYPER_PARAMS_KEY = "hyper_parameters"
+#: Older checkpoints stored hyperparameters under this key.
+CHECKPOINT_PAST_HYPER_PARAMS_KEYS = ("hparams",)
+
+
+def _load_hparams_from_checkpoint(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    """Collect saved hyperparameters, newest key winning over legacy ones."""
+    hparams: dict[str, Any] = {}
+    for legacy_key in CHECKPOINT_PAST_HYPER_PARAMS_KEYS:
+        hparams.update(checkpoint.get(legacy_key, {}) or {})
+    hparams.update(checkpoint.get(CHECKPOINT_HYPER_PARAMS_KEY, {}) or {})
+    return hparams
+
+
+def _filter_init_kwargs(cls: type, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Drop entries ``cls.__init__`` cannot accept.
+
+    A class that takes ``**kwargs`` accepts everything, so nothing is dropped.
+    Otherwise a stale hyperparameter left in an old checkpoint would raise
+    ``TypeError`` instead of simply being ignored.
+    """
+    try:
+        spec = inspect.getfullargspec(cls.__init__)
+    except TypeError:  # pragma: no cover - builtin/slot __init__
+        return dict(kwargs)
+    if spec.varkw:
+        return dict(kwargs)
+    accepted = set(spec.args[1:]) | set(spec.kwonlyargs)
+    return {k: v for k, v in kwargs.items() if k in accepted}
 
 
 def load_from_checkpoint(
@@ -12,45 +45,47 @@ def load_from_checkpoint(
     strict: bool = True,
     **kwargs: Any,
 ) -> Any:
-    """Load a model from a checkpoint file.
+    """Load a model (or datamodule) from a checkpoint file.
+
+    The class is re-instantiated from the hyperparameters stored in the
+    checkpoint, so it must have been saved with ``save_hyperparameters()`` for
+    any ``__init__`` argument to be restored. ``**kwargs`` override the stored
+    values.
 
     Args:
-        cls: The Model class to instantiate.
+        cls: The class to instantiate.
         checkpoint_path: Path to the checkpoint file.
         map_location: Device to load tensors to.
-        strict: Whether to strictly enforce state_dict keys.
-        **kwargs: Additional kwargs to override hparams.
+        strict: Whether the checkpoint's keys must match the model's exactly.
+        **kwargs: Values overriding the stored hyperparameters.
 
     Returns:
-        An instance of cls with loaded state.
+        An instance of ``cls`` with its state restored.
     """
     checkpoint = paddle.load(checkpoint_path)
 
-    # Extract hparams from checkpoint (canonical "hyper_parameters" key, with
-    # backward-compatible fallback to the legacy "hparams" key).
-    hparams = checkpoint.get("hyper_parameters", checkpoint.get("hparams", {}))
+    hparams = _load_hparams_from_checkpoint(checkpoint)
+    hparams.update(kwargs)
+    obj = cls(**_filter_init_kwargs(cls, hparams))
 
-    # Override with kwargs
-    if kwargs:
-        hparams.update(kwargs)
+    state_dict = checkpoint.get("state_dict")
+    if state_dict is not None and hasattr(obj, "set_state_dict"):
+        missing, unexpected = obj.set_state_dict(state_dict)
+        if strict and (missing or unexpected):
+            raise RuntimeError(
+                f"Error(s) in loading state_dict for {cls.__name__}:\n"
+                f"\tMissing key(s) in state_dict: {sorted(missing)}\n"
+                f"\tUnexpected key(s) in state_dict: {sorted(unexpected)}\n"
+                "Pass `strict=False` to load anyway."
+            )
 
-    # Instantiate the model
-    if hparams and hasattr(cls, "_hparams_initial"):
-        model = cls(**hparams)
-    else:
-        model = cls()
+    if map_location is not None:
+        obj.to(map_location)
 
-    # Load state dict
-    if "state_dict" in checkpoint:
-        if strict:
-            model.set_state_dict(checkpoint["state_dict"])
-        else:
-            model.set_dict(checkpoint["state_dict"])
+    if hasattr(obj, "on_load_checkpoint"):
+        obj.on_load_checkpoint(checkpoint)
 
-    # Trigger load checkpoint hook
-    model.on_load_checkpoint(checkpoint)
-
-    return model
+    return obj
 
 
 def save_hparams_to_yaml(hparams: dict[str, Any], path: str) -> None:
@@ -59,7 +94,7 @@ def save_hparams_to_yaml(hparams: dict[str, Any], path: str) -> None:
         import yaml
 
         with open(path, "w") as f:
-            yaml.dump(hparams, f, default_flow_style=False)
+            yaml.dump(dict(hparams), f, default_flow_style=False)
     except ImportError:
         pass
 
