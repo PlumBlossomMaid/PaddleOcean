@@ -138,7 +138,11 @@ class ModelCheckpoint(Callback):
         return candidates
 
     def _should_skip_saving(self, trainer: Any) -> bool:
-        return getattr(trainer, "sanity_checking", False) or trainer.optimizer_step == self._last_step_saved
+        return (
+            bool(getattr(trainer, "fast_dev_run", False))  # checkpointing is disabled for debug runs
+            or getattr(trainer, "sanity_checking", False)
+            or trainer.optimizer_step == self._last_step_saved
+        )
 
     def _save_if_needed(self, trainer: Any, model: Any) -> None:
         if self._should_skip_saving(trainer):
