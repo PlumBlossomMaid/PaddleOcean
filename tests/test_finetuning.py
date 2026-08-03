@@ -144,6 +144,10 @@ def test_backbone_lr_schedules_up_and_aligns():
 
 def test_backbone_gets_smaller_updates_than_head():
     """The scaled backbone group should receive proportionally smaller updates."""
+    # Seeded: the assertion compares two small weight deltas computed from random
+    # data, so without a seed its outcome depends on wherever the global RNG
+    # happens to be — any test added ahead of this one could flip it.
+    paddle.seed(0)
     cb = BackboneFinetuning(
         unfreeze_backbone_at_epoch=0, backbone_initial_lr=0.001, initial_denom_lr=1.0, should_align=False
     )

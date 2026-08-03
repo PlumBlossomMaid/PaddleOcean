@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 import paddle
 
+from ocean.utils.rank_zero import rank_zero_warn
+
 
 def _clone_state(obj: Any) -> Any:
     """Recursively clone a state dict, copying tensors so later in-place training
@@ -92,12 +94,15 @@ class Tuner:
         min_batch_size: int = 2,
         max_batch_size: int = 512,
         steps_per_trial: int = 3,
-    ) -> int:
+    ) -> int | None:
         """Binary-search the largest batch size that fits in device memory.
 
         The model and optimizer state are restored on exit so the search leaves
-        the model exactly as it was found.
+        the model exactly as it was found. Returns ``None`` when skipped.
         """
+        if self.trainer.fast_dev_run:
+            rank_zero_warn("Skipping batch size scaler since `fast_dev_run` is enabled.")
+            return None
         device = self.trainer._resolve_device()
         model.to(device)
         model.train()
@@ -167,12 +172,15 @@ class Tuner:
         min_lr: float = 1e-8,
         max_lr: float = 1.0,
         num_steps: int = 100,
-    ) -> float:
+    ) -> float | None:
         """Exponentially increase LR over ``num_steps`` and pick the steepest-descent LR.
 
         Model and optimizer state are snapshotted and restored, so the diagnostic
-        training does not pollute the real weights.
+        training does not pollute the real weights. Returns ``None`` when skipped.
         """
+        if self.trainer.fast_dev_run:
+            rank_zero_warn("Skipping learning rate finder since `fast_dev_run` is enabled.")
+            return None
         if not self.trainer.optimizers:
             raise ValueError("No optimizer configured.")
 

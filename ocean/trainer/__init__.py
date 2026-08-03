@@ -39,6 +39,7 @@ from ocean.trainer.connectors.logger_connector import _ResultCollection
 from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerStatus
 from ocean.utils import MisconfigurationException
 from ocean.utils.data import sized_len
+from ocean.utils.model_helpers import _ModuleMode
 
 
 def _patch_ddp_attr_forward(ddp_model: paddle.nn.Layer) -> None:
@@ -61,6 +62,34 @@ def _patch_ddp_attr_forward(ddp_model: paddle.nn.Layer) -> None:
                 return getattr(self._layers, name)
 
     ddp_model.__class__ = _DDPProxy
+
+
+def _verify_barebones(**flags: Any) -> None:
+    """Reject flags that contradict ``barebones=True``.
+
+    ``barebones`` exists to strip every source of overhead for raw-speed
+    measurement. Anything the caller explicitly switched on would either be
+    silently switched back off (confusing) or defeat the mode (misleading), so
+    the conflict is reported instead.
+    """
+    reasons = {
+        "enable_checkpointing": "Checkpointing",
+        "enable_progress_bar": "The progress bar",
+        "enable_model_summary": "Model summary",
+        "logger": "Logging",
+        "log_every_n_steps": "Logging",
+        "num_sanity_val_steps": "Sanity checking",
+        "fast_dev_run": "Development run",
+        "detect_anomaly": "Anomaly detection",
+        "profiler": "Profiling",
+    }
+    for name, value in flags.items():
+        if value is None or value is False or value == 0:
+            continue
+        raise ValueError(
+            f"`Trainer(barebones=True, {name}={value!r})` was passed. "
+            f"{reasons[name]} can impact raw speed so it is disabled in barebones mode."
+        )
 
 
 class Trainer:
@@ -118,7 +147,7 @@ class Trainer:
         devices: Any = "auto",
         num_nodes: int = 1,
         precision: str = "32",
-        log_every_n_steps: int = 50,
+        log_every_n_steps: Optional[int] = None,
         limit_train_batches: Union[int, float] = 1.0,
         limit_val_batches: Union[int, float] = 1.0,
         limit_test_batches: Union[int, float] = 1.0,
@@ -136,9 +165,9 @@ class Trainer:
         benchmark: Any = None,
         callbacks: Optional[list] = None,
         logger: Any = None,
-        enable_checkpointing: bool = True,
-        enable_progress_bar: bool = True,
-        enable_model_summary: bool = True,
+        enable_checkpointing: Optional[bool] = None,
+        enable_progress_bar: Optional[bool] = None,
+        enable_model_summary: Optional[bool] = None,
         default_root_dir: Optional[str] = None,
         verbose: int = 1,
         inference_mode: bool = True,
@@ -151,11 +180,46 @@ class Trainer:
         plugins: Optional[Any] = None,
         enable_autolog_hparams: bool = True,
     ) -> None:
+        # === Barebones ===
+        # Raise rather than silently override: a flag the caller explicitly set
+        # and a mode that exists to remove all overhead are a contradiction, and
+        # quietly winning that argument is how people end up wondering where
+        # their checkpoints went.
+        if barebones:
+            _verify_barebones(
+                enable_checkpointing=enable_checkpointing,
+                enable_progress_bar=enable_progress_bar,
+                enable_model_summary=enable_model_summary,
+                logger=logger,
+                log_every_n_steps=log_every_n_steps,
+                num_sanity_val_steps=num_sanity_val_steps,
+                fast_dev_run=fast_dev_run,
+                detect_anomaly=detect_anomaly,
+                profiler=profiler,
+            )
+            enable_checkpointing = False
+            enable_progress_bar = False
+            enable_model_summary = False
+            logger = False
+            log_every_n_steps = 0
+            num_sanity_val_steps = 0
+
         # === Init with defaults ===
         if max_epochs is None:
             max_epochs = 1000 if max_steps <= 0 else 1000
+        if enable_checkpointing is None:
+            enable_checkpointing = True
+        if enable_progress_bar is None:
+            enable_progress_bar = True
+        if enable_model_summary is None:
+            enable_model_summary = True
+        if log_every_n_steps is None:
+            log_every_n_steps = 50
         if num_sanity_val_steps is None:
             num_sanity_val_steps = 2
+        elif num_sanity_val_steps == -1:
+            # -1 means "sanity check the whole validation set".
+            num_sanity_val_steps = float("inf")
 
         self.max_epochs = max_epochs
         self.min_epochs = min_epochs or 0
@@ -202,11 +266,6 @@ class Trainer:
         self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
         self.detect_anomaly = detect_anomaly
         self.default_root_dir = default_root_dir or "."
-
-        if barebones:
-            enable_checkpointing = False
-            enable_progress_bar = False
-            logger = False
 
         # === State ===
         self.state = TrainerState()
@@ -722,7 +781,7 @@ class Trainer:
         min_batch_size: int = 2,
         max_batch_size: int = 512,
         steps_per_trial: int = 3,
-    ) -> int:
+    ) -> Optional[int]:
         """Find the largest batch size that fits in device memory.
 
         Runs real forward/backward/step trials; the model and optimizer state are
@@ -744,7 +803,7 @@ class Trainer:
         min_lr: float = 1e-8,
         max_lr: float = 1.0,
         num_steps: int = 100,
-    ) -> float:
+    ) -> Optional[float]:
         """Find a good learning rate via an exponential LR range test.
 
         The diagnostic training is rolled back so the real weights are untouched.
@@ -1091,7 +1150,11 @@ class Trainer:
 
         self.state.stage = RunningStage.SANITY_CHECKING
         self.sanity_checking = True
-        model.eval()
+        # Same eval-mode contract as the evaluation loop: switch through the
+        # hook, restore the exact modes we found.
+        module_mode = _ModuleMode()
+        module_mode.capture(model)
+        _call_module_hook(self, "on_validation_model_eval")
         try:
             _call_callback_hooks(self, "on_sanity_check_start")
             # Call on_validation_start/epoch_end hooks, matching
@@ -1118,7 +1181,7 @@ class Trainer:
             _call_callback_hooks(self, "on_sanity_check_end")
             self.sanity_checking = False
             self.state.stage = prev_stage
-            model.train()
+            module_mode.restore(model)
             # Discard sanity metrics and restore the pre-sanity collection.
             self._logger_connector.reset_validation_metrics()
             self._results = prev_results
