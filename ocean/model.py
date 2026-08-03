@@ -364,7 +364,17 @@ class Model(HyperparametersMixin, nn.Layer):
         through the strategy.
         Falls back to a plain ``loss.backward()`` when no trainer/strategy is
         attached (e.g. unit tests calling the model directly).
+
+        Only valid in manual optimization: in automatic mode the loop already
+        runs the backward pass, so a second one here would quietly accumulate
+        gradients twice.
         """
+        if self._automatic_optimization:
+            raise RuntimeError(
+                "`manual_backward()` is only valid in manual optimization. Set"
+                " `self.automatic_optimization = False` in __init__, or drop the call and let"
+                " the training loop run the backward pass."
+            )
         trainer = self._trainer
         if trainer is not None and trainer.strategy is not None:
             trainer.strategy.backward(loss, *args, **kwargs)

@@ -27,9 +27,17 @@ class Precision:
     def convert_output(self, data: Any) -> Any:
         return data
 
-    def pre_backward(self, tensor: paddle.Tensor, module: Any) -> None: ...
+    def pre_backward(self, tensor: paddle.Tensor, module: Any) -> paddle.Tensor:
+        """Return the tensor to differentiate (subclasses may transform it)."""
+        return tensor
+
     def backward(self, tensor: paddle.Tensor, model: Any, *args: Any, **kwargs: Any) -> None:
-        tensor.backward(*args, **kwargs)
+        """Delegate to the model, so an overridden ``Model.backward`` is honoured."""
+        backward_fn = getattr(model, "backward", None)
+        if backward_fn is not None:
+            backward_fn(tensor, *args, **kwargs)
+        else:
+            tensor.backward(*args, **kwargs)
 
     def post_backward(self, tensor: paddle.Tensor, module: Any) -> paddle.Tensor:
         return tensor.detach()
