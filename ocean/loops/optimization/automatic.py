@@ -56,20 +56,31 @@ class _AutomaticOptimization:
             _call_callback_hooks(trainer, "on_after_backward")
 
             if should_step:
-                self._clip_gradients(model, raw_opt)
-                model.on_before_optimizer_step(raw_opt)
-                _call_callback_hooks(trainer, "on_before_optimizer_step", raw_opt)
-                # Route the step/zero_grad through the model hooks so user
-                # overrides of optimizer_step / optimizer_zero_grad actually
-                # fire. The defaults delegate to trainer.strategy.optimizer_step
-                # (AMP scaler) and optimizer.clear_grad() respectively.
-                model.optimizer_step(trainer.current_epoch, batch_idx, raw_opt)
-                trainer._advance_optimizer_step()
-                model.on_before_zero_grad(raw_opt)
-                _call_callback_hooks(trainer, "on_before_zero_grad", raw_opt)
-                model.optimizer_zero_grad(trainer.current_epoch, batch_idx, raw_opt)
+                self.optimizer_step(raw_opt, batch_idx)
 
         return result if isinstance(result, dict) else {"loss": loss}
+
+    def optimizer_step(self, raw_opt: Any, batch_idx: int) -> None:
+        """Clip, step and zero the gradients accumulated so far.
+
+        Split out from :meth:`run` so the epoch loop can also apply a
+        partially-filled accumulation window left over when the dataloader is
+        exhausted (an epoch of unknown length never reports a last batch).
+        """
+        trainer = self.trainer
+        model = trainer._model
+        self._clip_gradients(model, raw_opt)
+        model.on_before_optimizer_step(raw_opt)
+        _call_callback_hooks(trainer, "on_before_optimizer_step", raw_opt)
+        # Route the step/zero_grad through the model hooks so user overrides of
+        # optimizer_step / optimizer_zero_grad actually fire. The defaults
+        # delegate to trainer.strategy.optimizer_step (AMP scaler) and
+        # optimizer.clear_grad() respectively.
+        model.optimizer_step(trainer.current_epoch, batch_idx, raw_opt)
+        trainer._advance_optimizer_step()
+        model.on_before_zero_grad(raw_opt)
+        _call_callback_hooks(trainer, "on_before_zero_grad", raw_opt)
+        model.optimizer_zero_grad(trainer.current_epoch, batch_idx, raw_opt)
 
     def _clip_gradients(self, model: Any, raw_opt: Any) -> None:
         """Apply gradient clipping per the trainer's configured algorithm.

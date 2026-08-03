@@ -86,11 +86,9 @@ class _FitLoop(_Loop):
         # Cache the limit-adjusted batch count once for the whole run. Using the
         # resolved limit (not the raw len) makes both int and fractional
         # limit_train_batches (e.g. 0.5) actually cap training, and drives
-        # num_training_batches.
-        try:
-            effective_train_batches = trainer._resolve_limit(train_loader, trainer.limit_train_batches)
-        except TypeError:
-            effective_train_batches = 0
+        # num_training_batches. An unsized (streaming) loader resolves to
+        # ``inf`` — the epoch then runs until the iterator is exhausted.
+        effective_train_batches = trainer._resolve_limit(train_loader, trainer.limit_train_batches)
         self.epoch_loop._max_batches = effective_train_batches
 
         # The validation schedule keys off the same limit-adjusted count (so
@@ -165,10 +163,7 @@ class _FitLoop(_Loop):
 
         datamodule.setup("fit")
         trainer.train_dataloader = datamodule.train_dataloader()
-        try:
-            self.epoch_loop._max_batches = trainer._resolve_limit(trainer.train_dataloader, trainer.limit_train_batches)
-        except TypeError:
-            self.epoch_loop._max_batches = 0
+        self.epoch_loop._max_batches = trainer._resolve_limit(trainer.train_dataloader, trainer.limit_train_batches)
 
     def teardown(self) -> None:
         self.epoch_loop.teardown()

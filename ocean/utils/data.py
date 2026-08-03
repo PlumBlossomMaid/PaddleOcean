@@ -1,8 +1,27 @@
 """Data utility functions."""
 
-from typing import Any
+from typing import Any, Optional
 
 import paddle
+
+
+def sized_len(dataloader: Any) -> Optional[int]:
+    """Return ``len(dataloader)``, or ``None`` when it has no usable length.
+
+    Paddle raises :class:`ValueError` (not ``TypeError``) from
+    ``DataLoader.__len__`` when the underlying dataset is an
+    ``IterableDataset``, so catch that too — an unsized loader is a normal
+    streaming setup, not an error.
+    """
+    try:
+        return len(dataloader)
+    except (TypeError, AttributeError, NotImplementedError, ValueError):
+        return None
+
+
+def has_len(dataloader: Any) -> bool:
+    """Whether the dataloader exposes a usable length."""
+    return sized_len(dataloader) is not None
 
 
 def move_data_to_device(batch: Any, device: Any) -> Any:

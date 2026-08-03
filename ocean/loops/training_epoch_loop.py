@@ -97,12 +97,15 @@ class _TrainingEpochLoop(_Loop):
         # (future: a Paddle ``StatefulDataLoader`` equivalent) would resume mid-epoch
         # because its ``__iter__`` yields the already-skipped batches, in which case
         # batch_idx still from 0 is correct since the iterator itself advanced.
+        pending_grads = False
+        last_batch_idx = -1
         for batch_idx, batch in enumerate(iter(train_loader)):
             if trainer._should_limit_batches(batch_idx, "train"):
                 break
             if max_batches and batch_idx >= max_batches:
                 break
 
+            last_batch_idx = batch_idx
             self.batch_progress.increment_ready()
             is_last = bool(max_batches) and batch_idx == max_batches - 1
             self.batch_progress.update_last_batch(is_last)
@@ -137,6 +140,7 @@ class _TrainingEpochLoop(_Loop):
 
             # Advance the global step + schedulers + logging on a real optimizer step.
             if model.automatic_optimization:
+                pending_grads = not should_step
                 if should_step:
                     trainer._dataloader_step += 1
                     self._update_lr_schedulers("step")
@@ -159,6 +163,24 @@ class _TrainingEpochLoop(_Loop):
 
             if is_last:
                 break
+        else:
+            # Reached only when the loader ran dry on its own (no break): every
+            # stopping condition above either closed the accumulation window via
+            # ``is_last`` or is deliberately cutting the run short. A sized epoch
+            # closes on ``is_last``, but a streaming loader has no known last
+            # batch, so without this flush the gradients accumulated by the
+            # trailing batches would be dropped on the floor.
+            self._flush_pending_gradients(pending_grads, last_batch_idx)
+
+    def _flush_pending_gradients(self, pending_grads: bool, last_batch_idx: int) -> None:
+        """Step the optimizer for a partially-filled accumulation window."""
+        trainer = self.trainer
+        model = trainer._model
+        if pending_grads and model.automatic_optimization:
+            self.automatic_optimization.optimizer_step(trainer.optimizers[0]._optimizer, last_batch_idx)
+            trainer._dataloader_step += 1
+            self._update_lr_schedulers("step")
+            self._maybe_log_metrics()
 
     # ------------------------------------------------------------------
     # LR schedulers / logging
@@ -219,7 +241,7 @@ class _TrainingEpochLoop(_Loop):
         val_limit = getattr(trainer, "limit_val_batches", 1.0)
         try:
             for dataloader in val_loader if isinstance(val_loader, (list, tuple)) else [val_loader]:
-                max_val_batches = trainer._resolve_limit(dataloader, val_limit)
+                max_val_batches = trainer._resolve_limit(dataloader, val_limit, stage="val")
                 with paddle.no_grad():
                     for batch_idx, batch in enumerate(dataloader):
                         if max_val_batches and batch_idx >= max_val_batches:

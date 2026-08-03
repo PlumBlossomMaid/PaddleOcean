@@ -84,7 +84,7 @@ class _EvaluationLoop(_Loop):
 
         with paddle.no_grad():
             for dl_idx, dataloader in enumerate(dataloaders):
-                max_batches = trainer._resolve_limit(dataloader, limit)
+                max_batches = trainer._resolve_limit(dataloader, limit, stage=mode)
                 for batch_idx, batch in enumerate(dataloader):
                     if max_batches and batch_idx >= max_batches:
                         break
