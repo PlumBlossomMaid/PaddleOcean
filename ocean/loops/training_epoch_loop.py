@@ -100,14 +100,16 @@ class _TrainingEpochLoop(_Loop):
         pending_grads = False
         last_batch_idx = -1
         for batch_idx, batch in enumerate(iter(train_loader)):
-            if trainer._should_limit_batches(batch_idx, "train"):
-                break
-            if max_batches and batch_idx >= max_batches:
+            # ``max_batches`` is already limit-adjusted and may be inf for a
+            # loader with no length. Comparing directly (rather than guarding on
+            # truthiness first) is what makes a cap of 0 mean "no batches"
+            # instead of "no cap".
+            if batch_idx >= max_batches:
                 break
 
             last_batch_idx = batch_idx
             self.batch_progress.increment_ready()
-            is_last = bool(max_batches) and batch_idx == max_batches - 1
+            is_last = batch_idx == max_batches - 1
             self.batch_progress.update_last_batch(is_last)
 
             batch = trainer._move_to_device(batch, device)
@@ -244,7 +246,7 @@ class _TrainingEpochLoop(_Loop):
                 max_val_batches = trainer._resolve_limit(dataloader, val_limit, stage="val")
                 with paddle.no_grad():
                     for batch_idx, batch in enumerate(dataloader):
-                        if max_val_batches and batch_idx >= max_val_batches:
+                        if batch_idx >= max_val_batches:
                             break
                         batch = trainer._move_to_device(batch, device)
                         trainer._results.batch = batch
