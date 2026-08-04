@@ -28,6 +28,21 @@ class PredictionWriter(Callback):
         if self.write_interval == "batch" and outputs is not None:
             self._write_batch(outputs, batch_idx, dataloader_idx)
 
+    def on_predict_epoch_end(self, trainer: Any, model: Any) -> None:
+        """Write everything at once when configured for the epoch interval.
+
+        The prediction loop keeps the batches for the whole run precisely so an
+        epoch-interval writer has something to write; without this the interval
+        was accepted and then silently produced no files.
+        """
+        if self.write_interval != "epoch":
+            return
+        predictions = getattr(trainer.predict_loop, "_predictions", None) or []
+        for dataloader_idx, dl_predictions in enumerate(predictions):
+            for batch_idx, outputs in enumerate(dl_predictions):
+                if outputs is not None:
+                    self._write_batch(outputs, batch_idx, dataloader_idx)
+
     def _write_batch(self, outputs: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         import os
 
