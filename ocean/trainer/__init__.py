@@ -19,6 +19,7 @@ except ImportError:
 
     _HAS_PADDLEMETRICS = False
 
+from ocean.plugins.layer_sync import SyncBN
 from ocean.strategies import SingleDeviceStrategy
 from ocean.trainer.call import (
     _call_and_handle_interrupt,
@@ -40,6 +41,7 @@ from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerS
 from ocean.utils import MisconfigurationException
 from ocean.utils.data import sized_len
 from ocean.utils.model_helpers import _ModuleMode
+from ocean.utils.rank_zero import rank_zero_warn
 
 
 def _patch_ddp_attr_forward(ddp_model: paddle.nn.Layer) -> None:
@@ -323,7 +325,12 @@ class Trainer:
 
             self.loggers = [DummyLogger()] if self.loggers else []
         self._callback_connector.on_trainer_init(
-            callbacks, enable_checkpointing, enable_progress_bar, self.default_root_dir, max_time
+            callbacks,
+            enable_checkpointing,
+            enable_progress_bar,
+            self.default_root_dir,
+            max_time,
+            enable_model_summary,
         )
 
         # === Loops ===
@@ -338,6 +345,13 @@ class Trainer:
 
         # === Strategy ===
         self.strategy = self._accelerator_connector.strategy
+
+        # === Plugins ===
+        # `plugins` used to be stored and never read, so a precision plugin
+        # passed this way was silently replaced by the one derived from the
+        # `precision` string.
+        self._layer_sync = SyncBN()
+        self._apply_plugins(plugins)
 
         # === Metrics ===
         # Per-stage metric storage. The active collection is swapped by the loops
@@ -554,6 +568,12 @@ class Trainer:
         from ocean.utilities.compile import _verify_strategy_supports_compile
 
         _verify_strategy_supports_compile(model, self.strategy)
+
+        # Convert BatchNorm layers before the model is placed or wrapped: a flag
+        # that was collected and never acted on left every batch-norm layer
+        # computing statistics from its own device only.
+        if self.sync_batchnorm:
+            self._layer_sync.sync(model)
 
         # Attach data
         self._data_connector.attach_data(model, train_dataloaders, val_dataloaders, datamodule=datamodule)
@@ -973,6 +993,30 @@ class Trainer:
             raise RuntimeError("CUDA not available")
         return paddle.CPUPlace()
 
+    def _apply_plugins(self, plugins: Optional[Any]) -> None:
+        """Install user-provided plugins onto the strategy.
+
+        Recognises the two kinds Ocean has: a precision plugin (which replaces
+        the one derived from the ``precision`` string) and a layer-sync plugin
+        (which ``sync_batchnorm`` then applies). Anything else is reported
+        rather than silently dropped.
+        """
+        if not plugins:
+            return
+        from ocean.plugins.layer_sync import LayerSync
+        from ocean.plugins.precision.precision import Precision
+
+        for plugin in plugins if isinstance(plugins, (list, tuple)) else [plugins]:
+            if isinstance(plugin, Precision):
+                self.strategy._precision_plugin = plugin
+            elif isinstance(plugin, LayerSync):
+                self._layer_sync = plugin
+            else:
+                rank_zero_warn(
+                    f"Ignoring unsupported plugin {type(plugin).__name__}; "
+                    "Trainer plugins may be a precision plugin or a layer-sync plugin."
+                )
+
     def _resolve_optimizers(self, model: Any) -> list:
         """Configure all optimizers from the model, wrapped in OceanOptimizer."""
         from ocean.core.optimizer import OceanOptimizer, init_optimizers_and_lr_schedulers
@@ -1122,8 +1166,21 @@ class Trainer:
             current_iteration = batch_idx
         return (current_iteration + 1) % vcb == 0
 
+    def _can_stop_early(self) -> bool:
+        """Whether an early stop request may be honoured yet.
+
+        ``min_steps``/``min_epochs`` are floors: a callback asking to stop
+        before them has to wait. ``min_steps`` used to be stored and never
+        consulted, so the floor did not exist.
+        """
+        enough_steps = self.min_steps is None or self._dataloader_step >= self.min_steps
+        enough_epochs = self.current_epoch >= self.min_epochs
+        return enough_steps and enough_epochs
+
     def _should_stop(self) -> bool:
-        return self.should_stop or (0 < self.max_steps <= self._dataloader_step)
+        if 0 < self.max_steps <= self._dataloader_step:
+            return True
+        return self.should_stop and self._can_stop_early()
 
     def _sanity_check(self, model: Any, device: Any) -> None:
         """Run sanity check.
