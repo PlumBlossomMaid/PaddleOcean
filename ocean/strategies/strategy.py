@@ -93,10 +93,16 @@ class Strategy(ABC):
         opts, _ = init_optimizers_and_lr_schedulers(trainer._model)
         self._optimizers = opts
 
-    def backward(self, closure_loss: Any, *args: Any, **kwargs: Any) -> None:
-        self._precision_plugin.pre_backward(closure_loss, self._model)
+    def backward(self, closure_loss: Any, *args: Any, **kwargs: Any) -> Any:
+        """Route a backward pass through the precision plugin.
+
+        ``pre_backward`` returns the tensor to differentiate — under mixed
+        precision that is the *scaled* loss — so its result must be threaded
+        into ``backward``, not discarded.
+        """
+        closure_loss = self._precision_plugin.pre_backward(closure_loss, self._model)
         self._precision_plugin.backward(closure_loss, self._model, *args, **kwargs)
-        self._precision_plugin.post_backward(closure_loss, self._model)
+        return self._precision_plugin.post_backward(closure_loss, self._model)
 
     def optimizer_step(self, optimizer: Any, **kwargs: Any) -> Any:
         return self._precision_plugin.optimizer_step(optimizer, **kwargs)

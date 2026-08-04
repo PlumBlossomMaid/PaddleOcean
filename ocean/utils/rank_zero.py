@@ -82,6 +82,14 @@ class _DummyExperiment:
     def __exit__(self, *args: Any) -> None:
         pass
 
+    def __getitem__(self, idx: int) -> "_DummyExperiment":
+        # Enables ``logger.experiment[0].add_image(...)``: indexing a real
+        # multi-writer experiment must not blow up just because logging is off.
+        return self
+
+    def __setitem__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
 
 def _no_op(*args: Any, **kwargs: Any) -> "_DummyExperiment":
     return _DummyExperiment()

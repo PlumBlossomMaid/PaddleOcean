@@ -22,9 +22,14 @@ class MixedPrecision(Precision):
         dtype = "float16" if self.precision.startswith("16") else "bfloat16"
         return paddle.amp.auto_cast(level=self._level, dtype=dtype)
 
-    def backward(self, tensor: paddle.Tensor, model: Any, *args: Any, **kwargs: Any) -> None:
-        scaled = self._scaler.scale(tensor)
-        scaled.backward(*args, **kwargs)
+    def pre_backward(self, tensor: paddle.Tensor, module: Any) -> paddle.Tensor:
+        """Scale the loss before it is differentiated.
+
+        Scaling here (rather than inside ``backward``) keeps ``backward``
+        delegating to the model, so an overridden ``Model.backward`` still runs
+        and still receives the scaled loss.
+        """
+        return self._scaler.scale(tensor)
 
     def optimizer_step(self, optimizer: paddle.optimizer.Optimizer, **kwargs: Any) -> Any:
         self._scaler.step(optimizer)
