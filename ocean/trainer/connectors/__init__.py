@@ -12,6 +12,7 @@ import paddle
 import ocean
 from ocean.callbacks.callback import Callback
 from ocean.callbacks.checkpoint import ModelCheckpoint
+from ocean.callbacks.model_summary import ModelSummary
 from ocean.callbacks.progress import ProgressBar
 
 # _LoggerConnector now lives in the logger_connector/ subpackage alongside the
@@ -19,6 +20,7 @@ from ocean.callbacks.progress import ProgressBar
 # ``from ocean.trainer.connectors import _LoggerConnector`` imports keep working.
 from ocean.trainer.connectors.logger_connector import _LoggerConnector
 from ocean.utils import MisconfigurationException
+from ocean.utils.rank_zero import rank_zero_info
 
 __all__ = [
     "_DataConnector",
@@ -68,6 +70,28 @@ class _DataConnector:
         self.trainer.val_check_interval = val_check_interval
         self.trainer.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
         self.trainer.check_val_every_n_epoch = check_val_every_n_epoch
+
+    @staticmethod
+    def _disable_shuffling(dataloader: Any) -> None:
+        """Pin a loader to a fixed batch order, for overfit runs.
+
+        Paddle fixes the order when the ``BatchSampler`` is *built* — a
+        ``shuffle=True`` loader holds a ``RandomSampler`` and never looks at the
+        ``shuffle`` flag again — so the inner sampler is what has to be replaced.
+        """
+        for loader in dataloader if isinstance(dataloader, (list, tuple)) else [dataloader]:
+            batch_sampler = getattr(loader, "batch_sampler", None)
+            inner = getattr(batch_sampler, "sampler", None)
+            if batch_sampler is None or inner is None:
+                continue
+            if not isinstance(inner, paddle.io.RandomSampler):
+                continue
+            dataset = getattr(inner, "data_source", None) or getattr(loader, "dataset", None)
+            if dataset is None:
+                continue
+            batch_sampler.sampler = paddle.io.SequenceSampler(dataset)
+            batch_sampler.shuffle = False
+            rank_zero_info("`overfit_batches` is set: shuffling is disabled so every epoch sees the same batches.")
 
     def prepare_data(self) -> None:
         """Run datamodule.prepare_data() under rank gating + a barrier.
@@ -123,6 +147,12 @@ class _DataConnector:
             self.trainer.test_dataloaders = [test_dataloaders] if test_dataloaders is not None else []
             self.trainer.predict_dataloaders = [predict_dataloaders] if predict_dataloaders is not None else []
 
+        # overfit_batches means "keep hammering the same batches"; with a
+        # shuffling loader the limit alone gives a *different* subset every
+        # epoch, which overfits nothing.
+        if getattr(self.trainer, "overfit_batches", 0):
+            self._disable_shuffling(self.trainer.train_dataloader)
+
 
 # ====================================================================
 # Callback Connector
@@ -142,6 +172,7 @@ class _CallbackConnector:
         enable_progress_bar: bool,
         default_root_dir: Optional[str],
         max_time: Any = None,
+        enable_model_summary: bool = True,
     ) -> None:
         callbacks = callbacks or []
         if enable_checkpointing and not any(isinstance(cb, ModelCheckpoint) for cb in callbacks):
@@ -150,6 +181,10 @@ class _CallbackConnector:
             from ocean.callbacks.progress import TQDMProgressBar
 
             callbacks.append(TQDMProgressBar())
+        if enable_model_summary and not any(isinstance(cb, ModelSummary) for cb in callbacks):
+            # The flag was collected and never read, so the summary never
+            # appeared however it was set.
+            callbacks.append(ModelSummary())
         if max_time is not None and not any(cb.__class__.__name__ == "Timer" for cb in callbacks):
             from ocean.callbacks.timer import Timer
 

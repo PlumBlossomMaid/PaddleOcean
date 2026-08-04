@@ -68,7 +68,7 @@ class _FitLoop(_Loop):
         trainer = self.trainer
         if trainer.current_epoch >= self.max_epochs:
             return True
-        if trainer.should_stop and trainer.current_epoch >= self.min_epochs:
+        if trainer.should_stop and trainer._can_stop_early():
             return True
         return False
 
