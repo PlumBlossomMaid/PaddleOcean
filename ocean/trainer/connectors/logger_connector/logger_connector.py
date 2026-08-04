@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ocean.loggers.base import Logger
 from ocean.loggers.csv_logs import CSVLogger
 
 
@@ -29,15 +28,22 @@ class _LoggerConnector:
         self.trainer.log_every_n_steps = log_every_n_steps
 
     def configure_logger(self, logger: Any) -> None:
-        """Configure logger from bool/None/Logger/list."""
+        """Configure loggers from ``bool`` / ``None`` / a logger / a list of them.
+
+        Anything else that is handed over is taken at face value as a single
+        logger. Requiring a :class:`~ocean.loggers.base.Logger` subclass here
+        meant a logger that merely implemented the interface fell through every
+        branch and left ``trainer.loggers`` empty — the run then trained
+        normally with every metric quietly going nowhere.
+        """
         if logger is False:
             self.trainer.loggers = []
         elif logger is True or logger is None:
             self.trainer.loggers = [CSVLogger(root_dir=self.trainer.default_root_dir or ".")]
-        elif isinstance(logger, Logger):
-            self.trainer.loggers = [logger]
         elif isinstance(logger, (list, tuple)):
-            self.trainer.loggers = list(logger)
+            self.trainer.loggers = [lg for lg in logger if lg is not False and lg is not None]
+        else:
+            self.trainer.loggers = [logger]
 
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
         """Dispatch a metric dict to each logger (loggers filter by rank internally)."""
