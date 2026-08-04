@@ -330,8 +330,14 @@ def test_gear_basic():
 def test_gear_setup_dataloaders():
     gear = ocean.Gear()
     loader = make_train_loader()
+    # move_to_device=True (the default) wraps the loader so batches arrive on
+    # the device; the wrapper stays len()-able and iterable.
     result = gear.setup_dataloaders(loader)
-    assert result is loader
+    assert result is not loader
+    assert len(result) == len(loader)
+    assert next(iter(result)) is not None
+    # Opting out hands back the original object untouched.
+    assert gear.setup_dataloaders(loader, move_to_device=False) is loader
 
 
 def test_gear_save_load():

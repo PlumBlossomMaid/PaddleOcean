@@ -90,24 +90,52 @@ def test_no_strategy_defaults_to_prepare():
     assert dm.events == ["prepare"]
 
 
-def test_attach_data_prepares_before_setup():
-    """In the fit path, attach_data must call prepare_data before setup('fit')."""
+def test_fit_prepares_before_setup_and_before_reading_the_data():
+    """The fit path must run prepare_data, then setup('fit'), then read the
+    dataloaders — each step depends on the one before it.
 
-    class _AttachDM(_RecordingDataModule):
+    prepare_data and setup are dispatched by the Trainer (setup also has to
+    reach the callbacks and the model); attach_data only reads what they built.
+    """
+    import paddle
+
+    import ocean
+
+    events = []
+
+    class _DM(ocean.DataModule):
+        def prepare_data(self):
+            events.append("prepare")
+
+        def setup(self, stage):
+            events.append(f"setup:{stage}")
+            self.dataset = paddle.io.TensorDataset([paddle.randn([8, 4]), paddle.randint(0, 2, [8])])
+
         def train_dataloader(self):
-            return "train"
+            events.append("train_dataloader")
+            return paddle.io.DataLoader(self.dataset, batch_size=4)
 
         def val_dataloader(self):
-            return "val"
+            return paddle.io.DataLoader(self.dataset, batch_size=4)
 
-    strat = _FakeStrategy()
-    trainer = _FakeTrainer(strat)
-    # attach_data writes several trainer attributes; give it a place to put them
-    dm = _AttachDM()
-    conn = _DataConnector(trainer)
-    conn.attach_data(model=None, datamodule=dm)
+    class _M(ocean.Model):
+        def __init__(self):
+            super().__init__()
+            self.linear = paddle.nn.Linear(4, 2)
 
-    # prepare must come first, then setup('fit')
-    assert dm.events[0] == "prepare"
-    assert "setup:fit" in dm.events
-    assert dm.events.index("prepare") < dm.events.index("setup:fit")
+        def forward(self, x):
+            return self.linear(x)
+
+        def training_step(self, batch, batch_idx):
+            x, y = batch
+            return paddle.nn.functional.cross_entropy(self(x), y)
+
+        def configure_optimizers(self):
+            return paddle.optimizer.SGD(learning_rate=0.01, parameters=self.parameters())
+
+    trainer = ocean.Trainer(
+        max_epochs=1, verbose=0, logger=False, enable_checkpointing=False, enable_progress_bar=False
+    )
+    trainer.fit(_M(), datamodule=_DM())
+
+    assert events[:3] == ["prepare", "setup:fit", "train_dataloader"]

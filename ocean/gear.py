@@ -73,6 +73,28 @@ class Gear:
     def strategy(self) -> Optional[Strategy]:
         return self._strategy
 
+    @property
+    def logger(self) -> Any:
+        """The first configured logger, or None."""
+        return self.loggers[0] if self.loggers else None
+
+    @property
+    def global_rank(self) -> int:
+        return getattr(self._strategy, "global_rank", 0) if self._strategy else 0
+
+    @property
+    def local_rank(self) -> int:
+        return getattr(self._strategy, "local_rank", 0) if self._strategy else 0
+
+    @property
+    def world_size(self) -> int:
+        return getattr(self._strategy, "world_size", 1) if self._strategy else 1
+
+    @property
+    def is_global_zero(self) -> bool:
+        """Whether this is the main process — the one that should write."""
+        return getattr(self._strategy, "is_global_zero", True) if self._strategy else True
+
     # ------------------------------------------------------------------
     # Resolution — accelerator/strategy selection logic
     # ------------------------------------------------------------------
@@ -85,6 +107,10 @@ class Gear:
         self._strategy = _AcceleratorConnector._resolve_strategy(self.strategy_flag, parallel)
         self._strategy.accelerator = self._accelerator
         self._strategy.parallel_devices = parallel
+        # Same precision resolution the Trainer does. Without this the strategy
+        # keeps its default full-precision plugin, so ``precision="16-mixed"``
+        # would cast the forward pass and then leave the backward unscaled.
+        self._strategy._precision_plugin = _AcceleratorConnector._resolve_precision(self.precision_flag)
 
     def _resolve_fallback_strategy(self) -> Strategy:
         """Create a minimal strategy for device access."""
@@ -146,22 +172,36 @@ class Gear:
             module.to(paddle.CPUPlace())
 
         if optimizers:
-            return (module, *optimizers)
+            # Wrapped so ``optimizer.step()`` goes through the precision plugin;
+            # a raw Paddle step under mixed precision would update on unscaled
+            # gradients and never call ``GradScaler.update()``.
+            wrapped = tuple(self._setup_optimizer(opt) for opt in optimizers)
+            return (module, *wrapped)
         return module
 
+    def _setup_optimizer(self, optimizer: paddle.optimizer.Optimizer) -> Any:
+        from ocean.core.optimizer import OceanOptimizer
+
+        wrapper = OceanOptimizer(optimizer)
+        if self._strategy is not None:
+            wrapper._precision_plugin = self._strategy.precision_plugin
+        return wrapper
+
     def setup_dataloaders(self, *dataloaders: paddle.io.DataLoader, move_to_device: bool = True) -> Any:
-        """Set up dataloaders. Returns the same dataloaders (future: distributed samplers).
+        """Set up dataloaders for training.
 
         Args:
             *dataloaders: DataLoaders to set up.
-            move_to_device: If True, batches are moved to device automatically.
+            move_to_device: If True, each batch is moved to the Gear's device as
+                it is yielded, so the loop body never has to.
 
         Returns:
             DataLoader(s) ready for training.
         """
-        if len(dataloaders) == 1:
-            return dataloaders[0]
-        return dataloaders
+        prepared = tuple(_GearDataLoader(dl, self) if move_to_device else dl for dl in dataloaders)
+        if len(prepared) == 1:
+            return prepared[0]
+        return prepared
 
     # ------------------------------------------------------------------
     # Training helpers
@@ -212,11 +252,21 @@ class Gear:
         checkpoint = paddle.load(path)
         if state is not None:
             for k, v in state.items():
-                if k in checkpoint:
-                    if isinstance(v, paddle.nn.Layer):
-                        v.set_state_dict(checkpoint[k])
-                    elif hasattr(v, "set_state_dict"):
-                        v.set_state_dict(checkpoint[k])
+                if k not in checkpoint:
+                    if strict:
+                        raise KeyError(
+                            f"Checkpoint {path!r} has no entry {k!r}. Available keys: {sorted(checkpoint)}. "
+                            "Pass `strict=False` to skip missing entries."
+                        )
+                    continue
+                if isinstance(v, paddle.nn.Layer):
+                    # set_state_dict warns rather than raises on a mismatch, so
+                    # a strict load has to check the keys itself.
+                    if strict:
+                        _verify_state_keys(v.state_dict(), checkpoint[k], k)
+                    v.set_state_dict(checkpoint[k])
+                elif hasattr(v, "set_state_dict"):
+                    v.set_state_dict(checkpoint[k])
         return checkpoint
 
     def barrier(self, name: Optional[str] = None) -> None:
@@ -245,6 +295,22 @@ class Gear:
             print(f"Global seed set to {seed}")
         return seed
 
+    def log(self, name: str, value: Any, step: Optional[int] = None) -> None:
+        """Send a single metric to every configured logger."""
+        self.log_dict({name: value}, step=step)
+
+    def log_dict(self, metrics: dict[str, Any], step: Optional[int] = None) -> None:
+        """Send a dict of metrics to every configured logger.
+
+        ``Gear(loggers=...)`` used to be accepted and then never read — there was
+        no way to get anything into them.
+        """
+        if not self.loggers:
+            return
+        scalars = {k: (v.item() if isinstance(v, paddle.Tensor) else v) for k, v in metrics.items()}
+        for logger in self.loggers:
+            logger.log_metrics(scalars, step)
+
     def print(self, *args: Any, **kwargs: Any) -> None:
         """Print only on the main process."""
         if not self._strategy or getattr(self._strategy, "is_global_zero", True):
@@ -264,11 +330,49 @@ class Gear:
         return obj
 
     def autocast(self) -> Any:
-        """Return an autocast context manager for mixed precision."""
-        if self.precision_flag in ("16", "16-mixed"):
-            return paddle.amp.auto_cast(level="O1")
-        elif self.precision_flag in ("bf16", "bf16-mixed"):
-            return paddle.amp.auto_cast(level="O2", dtype="bfloat16")
-        # fp32 / fp64: return a no-op context so grads are NOT disabled — using
+        """Return the forward context for the configured precision.
+
+        Delegates to the precision plugin, so the cast used here and the scaling
+        applied by ``backward()`` can never disagree about the precision.
+        """
+        if self._strategy is not None:
+            return self._strategy.precision_plugin.forward_context()
+        # No strategy: a no-op context, so grads are NOT disabled — using
         # `paddle.no_grad()` here would silently break backward under fp32.
         return nullcontext()
+
+
+def _verify_state_keys(current: dict, loaded: dict, name: str) -> None:
+    """Raise when a checkpoint entry does not match the object being restored."""
+    missing = sorted(set(current) - set(loaded))
+    unexpected = sorted(set(loaded) - set(current))
+    mismatched = [k for k in set(current) & set(loaded) if tuple(current[k].shape) != tuple(loaded[k].shape)]
+    if missing or unexpected or mismatched:
+        raise RuntimeError(
+            f"State for {name!r} does not match the checkpoint. "
+            f"Missing keys: {missing}. Unexpected keys: {unexpected}. Shape mismatch: {sorted(mismatched)}. "
+            "Pass `strict=False` to load anyway."
+        )
+
+
+class _GearDataLoader:
+    """Wraps a dataloader so each batch arrives on the Gear's device.
+
+    ``setup_dataloaders(move_to_device=True)`` used to return the loader
+    untouched, so the flag promised a device transfer that never happened and
+    the loop body still had to do it by hand.
+    """
+
+    def __init__(self, dataloader: Any, gear: "Gear") -> None:
+        self._dataloader = dataloader
+        self._gear = gear
+
+    def __iter__(self) -> Any:
+        for batch in self._dataloader:
+            yield self._gear.to_device(batch)
+
+    def __len__(self) -> int:
+        return len(self._dataloader)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._dataloader, name)

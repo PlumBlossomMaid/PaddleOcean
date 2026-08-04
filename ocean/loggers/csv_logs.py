@@ -6,7 +6,7 @@ only rank 0 writes CSV files.
 
 import csv
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from ocean.loggers.base import Logger
 from ocean.utils.rank_zero import rank_zero_experiment, rank_zero_only
@@ -86,6 +86,21 @@ class CSVLogger(Logger):
             self.save()
 
     @rank_zero_only
+    def log_hyperparams(self, params: dict[str, Any]) -> None:
+        """Write the hyperparameters next to the metrics.
+
+        The base class treats this as a no-op, so the default logger used to
+        drop everything handed to it — including whatever the Trainer logs
+        automatically at the start of a run.
+        """
+        if not params:
+            return
+        from ocean.core.saving import save_hparams_to_yaml
+
+        os.makedirs(self.log_dir, exist_ok=True)
+        save_hparams_to_yaml(dict(params), os.path.join(self.log_dir, "hparams.yaml"))
+
+    @rank_zero_only
     def save(self) -> None:
         self.experiment.save()
 
@@ -123,21 +138,43 @@ class _ExperimentWriter:
     def save(self) -> None:
         if not self.metrics:
             return
-        all_keys = set()
-        for m in self.metrics:
-            all_keys.update(m.keys())
-        new_keys = [k for k in all_keys if k not in self.metrics_keys]
-        self.metrics_keys.extend(new_keys)
-
+        new_keys = self._record_new_keys()
         file_exists = os.path.exists(self.metrics_file)
-        with open(self.metrics_file, "a", newline="") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=["step"] + [k for k in self.metrics_keys if k != "step"],
-                extrasaction="ignore",
-            )
+
+        # A metric seen for the first time widens the header. Appending under
+        # the old header would write rows with more fields than it declares —
+        # the file stops being the CSV it claims to be — so it is rewritten.
+        if new_keys and file_exists:
+            self._rewrite_with_new_header()
+
+        with open(self.metrics_file, "a" if file_exists else "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction="ignore")
             if not file_exists:
                 writer.writeheader()
             for m in self.metrics:
                 writer.writerow(m)
         self.metrics = []
+
+    @property
+    def fieldnames(self) -> list[str]:
+        """Column order: ``step`` first, then the rest sorted.
+
+        Sorted rather than "whatever the set iterated as": string hashing is
+        randomised per process, so the same run wrote its columns in a
+        different order every time.
+        """
+        return ["step"] + sorted(k for k in self.metrics_keys if k != "step")
+
+    def _record_new_keys(self) -> list[str]:
+        current = set().union(*self.metrics) if self.metrics else set()
+        new_keys = sorted(current - set(self.metrics_keys))
+        self.metrics_keys.extend(new_keys)
+        return new_keys
+
+    def _rewrite_with_new_header(self) -> None:
+        with open(self.metrics_file, newline="") as f:
+            rows = list(csv.DictReader(f))
+        with open(self.metrics_file, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)

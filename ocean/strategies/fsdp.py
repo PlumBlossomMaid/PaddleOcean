@@ -11,7 +11,10 @@ from typing import Any, Optional
 
 import paddle
 
+from ocean.strategies.deepspeed import DeepSpeedStrategy
 from ocean.strategies.parallel import ParallelStrategy
+from ocean.utils import MisconfigurationException
+from ocean.utils.rank_zero import rank_zero_warn
 
 
 class FSDPStrategy(ParallelStrategy):
@@ -25,11 +28,16 @@ class FSDPStrategy(ParallelStrategy):
 
     def __init__(
         self,
-        sharding_level: str = "p_g",
+        sharding_level: str = "p_g_os",
         cpu_offload: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        if sharding_level not in DeepSpeedStrategy.VALID_LEVELS:
+            raise MisconfigurationException(
+                f"`sharding_level` must be one of {list(DeepSpeedStrategy.VALID_LEVELS)}, got {sharding_level!r}. "
+                "These are the levels PaddlePaddle's group_sharded_parallel accepts."
+            )
         self._sharding_level = sharding_level
         self._cpu_offload = cpu_offload
 
@@ -58,11 +66,14 @@ class FSDPStrategy(ParallelStrategy):
                     self._model,
                     self._optimizers[0],
                     level=self._sharding_level,
+                    offload=self._cpu_offload,
                 )
                 self._model = model
                 self._optimizers = [opt]
-            except Exception:
-                pass
+            except Exception as exception:
+                # Reported rather than swallowed: an unsharded run looks exactly
+                # like a working one until it runs out of memory.
+                rank_zero_warn(f"Group sharding failed, the model is NOT sharded: {exception!r}")
 
     def model_to_device(self) -> None:
         if self._model is not None:
@@ -83,6 +94,7 @@ class FSDPStrategy(ParallelStrategy):
                 self._model,
                 filepath,
             )
-        except Exception:
+        except Exception as exception:
+            rank_zero_warn(f"Sharded checkpoint save failed, falling back to a plain save: {exception!r}")
             if self.is_global_zero:
                 paddle.save(checkpoint, filepath)

@@ -133,9 +133,8 @@ class _DataConnector:
         self.trainer.datamodule = datamodule
         if datamodule is not None:
             datamodule.trainer = self.trainer
-            # prepare_data (download/preprocess, rank-gated) must precede setup.
-            self.prepare_data()
-            datamodule.setup("fit")
+            # prepare_data and setup are dispatched by the caller, in that order,
+            # before this point: the datasets read below are what setup builds.
             self.trainer.train_dataloader = train_dataloaders or datamodule.train_dataloader()
             self.trainer.val_dataloaders = val_dataloaders or [datamodule.val_dataloader()]
             # Keep test/predict channels defined for later test()/predict() calls,
