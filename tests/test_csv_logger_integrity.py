@@ -107,15 +107,32 @@ def test_column_order_is_stable_across_processes():
 def test_hyperparameters_are_written(tmp_path):
     """The base class treats log_hyperparams as a no-op, so the default logger
     dropped everything handed to it."""
+    yaml = pytest.importorskip("yaml", reason="hyperparameters are written as YAML")
     logger = CSVLogger(root_dir=str(tmp_path))
     logger.log_hyperparams({"lr": 0.1, "batch_size": 8})
 
     path = os.path.join(logger.log_dir, "hparams.yaml")
     assert os.path.exists(path)
-
-    yaml = pytest.importorskip("yaml")
     with open(path) as f:
         assert yaml.safe_load(f) == {"lr": 0.1, "batch_size": 8}
+
+
+def test_missing_pyyaml_is_reported(tmp_path, monkeypatch, capsys):
+    """Without PyYAML the file cannot be written; that has to be said, not
+    silently skipped."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_yaml(name, *args, **kwargs):
+        if name == "yaml":
+            raise ImportError("no yaml")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_yaml)
+    CSVLogger(root_dir=str(tmp_path)).log_hyperparams({"lr": 0.1})
+
+    assert "PyYAML is not installed" in capsys.readouterr().out
 
 
 def test_empty_hyperparameters_write_nothing(tmp_path):
