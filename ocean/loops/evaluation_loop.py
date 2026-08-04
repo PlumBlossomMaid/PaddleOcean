@@ -11,6 +11,7 @@ from ocean.loops.progress import _BatchProgress
 from ocean.trainer.call import _call_callback_hooks, _call_module_hook
 from ocean.trainer.connectors.logger_connector.result import _ResultCollection
 from ocean.trainer.states import RunningStage, TrainerFn
+from ocean.utils.model_helpers import _ModuleMode
 
 
 class _EvaluationLoop(_Loop):
@@ -30,6 +31,7 @@ class _EvaluationLoop(_Loop):
         self.batch_progress = _BatchProgress()
         self._data_fetcher = _DataFetcher()
         self._outputs: list[dict[str, float]] = []
+        self._module_mode = _ModuleMode()
 
     @property
     def skip(self) -> bool:
@@ -49,6 +51,7 @@ class _EvaluationLoop(_Loop):
             batch_end_hook = "on_validation_batch_end"
             epoch_end_hook = "on_validation_epoch_end"
             end_hook = "on_validation_end"
+            model_eval_hook = "on_validation_model_eval"
         elif self.stage == RunningStage.TESTING:
             dataloaders = getattr(trainer, "test_dataloaders", None) or []
             start_hook = "on_test_start"
@@ -58,6 +61,7 @@ class _EvaluationLoop(_Loop):
             batch_end_hook = "on_test_batch_end"
             epoch_end_hook = "on_test_epoch_end"
             end_hook = "on_test_end"
+            model_eval_hook = "on_test_model_eval"
         else:
             return []
 
@@ -71,7 +75,12 @@ class _EvaluationLoop(_Loop):
         # Evaluation logs into its own (training=False) collection.
         trainer._results = _ResultCollection(training=False, fork_names=False)
 
-        model.eval()
+        # Switch to eval through the hook, so a model that overrides it (to keep
+        # part of itself in train mode, say) is respected. The per-sublayer modes
+        # are captured so they can be put back exactly as they were: a blanket
+        # .train() at the end would silently unfreeze a frozen sublayer.
+        self._module_mode.capture(model)
+        _call_module_hook(trainer, model_eval_hook)
         _call_module_hook(trainer, start_hook)
         _call_callback_hooks(trainer, start_hook)
         _call_module_hook(trainer, epoch_start_hook)
@@ -110,7 +119,7 @@ class _EvaluationLoop(_Loop):
         _call_callback_hooks(trainer, epoch_end_hook)
         _call_module_hook(trainer, end_hook)
         _call_callback_hooks(trainer, end_hook)
-        model.train()
+        self._module_mode.restore(model)
 
         # Dispatch logged metrics to the loggers so a standalone validate/test
         # run surfaces results through every backend (during fit, metrics from
