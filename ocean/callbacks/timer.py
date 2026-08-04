@@ -134,7 +134,13 @@ class Timer(Callback):
     def _check_time_remaining(self, trainer: Any) -> None:
         if self._duration is None:
             return
-        if self.time_elapsed() >= self._duration:
+        should_stop = self.time_elapsed() >= self._duration
+        # Clocks drift, so ranks cross the deadline at slightly different times.
+        # Deciding locally means some ranks leave the loop while others wait at
+        # the next collective, which hangs the run instead of ending it; rank 0's
+        # answer is the one that counts.
+        should_stop = trainer.strategy.broadcast(should_stop)
+        if should_stop:
             trainer.should_stop = True
             if self._verbose:
                 print(f"Timer: training time limit of {self._duration:.0f}s reached, stopping.")
