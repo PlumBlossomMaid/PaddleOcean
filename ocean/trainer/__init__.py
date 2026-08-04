@@ -26,6 +26,7 @@ from ocean.trainer.call import (
     _call_configure_model,
     _call_module_hook,
     _call_setup_hook,
+    _call_teardown_hook,
 )
 from ocean.trainer.connectors import (
     _AcceleratorConnector,
@@ -555,6 +556,15 @@ class Trainer:
 
         _verify_strategy_supports_compile(model, self.strategy)
 
+        # prepare_data (download/preprocess, rank-gated) -> setup -> read the
+        # datasets. setup is what builds what attach_data then asks for, and
+        # prepare_data is what setup itself may be reading from disk.
+        self.datamodule = datamodule
+        if datamodule is not None:
+            datamodule.trainer = self
+        self._data_connector.prepare_data()
+        _call_setup_hook(self, "fit")
+
         # Attach data
         self._data_connector.attach_data(model, train_dataloaders, val_dataloaders, datamodule=datamodule)
 
@@ -566,8 +576,6 @@ class Trainer:
         self.strategy.connect(model)
         self.strategy.setup_environment()
 
-        # Setup hooks
-        _call_setup_hook(self)
         _call_configure_model(self)
 
         # Device
@@ -666,11 +674,14 @@ class Trainer:
             datamodule.trainer = self
             self.datamodule = datamodule
             self._data_connector.prepare_data()
-            datamodule.setup("validate")
+
+        self.state.fn = TrainerFn.VALIDATING
+        # setup before the datasets are read, same as fit.
+        _call_setup_hook(self, "validate")
+        if datamodule is not None:
             dataloaders = [datamodule.val_dataloader()]
 
         self.val_dataloaders = [dataloaders] if not isinstance(dataloaders, (list, tuple)) else dataloaders
-        self.state.fn = TrainerFn.VALIDATING
 
         device = self._resolve_device()
         self._model.to(device)
@@ -684,6 +695,7 @@ class Trainer:
         finally:
             self.profiler.describe()
             self.profiler.teardown()
+            _call_teardown_hook(self, "validate")
 
     def test(
         self,
@@ -700,11 +712,13 @@ class Trainer:
             datamodule.trainer = self
             self.datamodule = datamodule
             self._data_connector.prepare_data()
-            datamodule.setup("test")
+
+        self.state.fn = TrainerFn.TESTING
+        _call_setup_hook(self, "test")
+        if datamodule is not None:
             dataloaders = [datamodule.test_dataloader()]
 
         self.test_dataloaders = [dataloaders] if not isinstance(dataloaders, (list, tuple)) else dataloaders
-        self.state.fn = TrainerFn.TESTING
 
         device = self._resolve_device()
         self._model.to(device)
@@ -717,6 +731,7 @@ class Trainer:
         finally:
             self.profiler.describe()
             self.profiler.teardown()
+            _call_teardown_hook(self, "test")
 
     def predict(
         self,
@@ -733,11 +748,13 @@ class Trainer:
             datamodule.trainer = self
             self.datamodule = datamodule
             self._data_connector.prepare_data()
-            datamodule.setup("predict")
+
+        self.state.fn = TrainerFn.PREDICTING
+        _call_setup_hook(self, "predict")
+        if datamodule is not None:
             dataloaders = [datamodule.predict_dataloader()]
 
         self.predict_dataloaders = [dataloaders] if not isinstance(dataloaders, (list, tuple)) else dataloaders
-        self.state.fn = TrainerFn.PREDICTING
 
         device = self._resolve_device()
         self._model.to(device)
@@ -749,6 +766,7 @@ class Trainer:
         finally:
             self.profiler.describe()
             self.profiler.teardown()
+            _call_teardown_hook(self, "predict")
 
     # ====================================================================
     # Tuning
@@ -1187,8 +1205,7 @@ class Trainer:
         self.strategy.teardown()
         self._signal_connector.teardown()
         self.fit_loop.teardown()
-        if self.datamodule is not None:
-            self.datamodule.teardown("fit")
+        _call_teardown_hook(self, "fit")
         # Clear the running stage so trainer.training/validating no longer read as
         # active once fit has finished.
         self.state.stage = None

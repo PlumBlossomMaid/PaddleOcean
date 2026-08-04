@@ -91,14 +91,37 @@ def _interrupt(trainer: Any, exception: BaseException) -> None:
     trainer._logger_connector.finalize("failed")
 
 
-def _call_setup_hook(trainer: Any) -> None:
-    """Call setup hook on model and datamodule."""
-    model = trainer._model
-    if hasattr(model, "setup"):
-        model.setup("fit")
+def _call_setup_hook(trainer: Any, stage: str = "fit") -> None:
+    """Call the ``setup`` hook on the datamodule, the callbacks and the model.
+
+    ``stage`` is the entry point being run (``fit``/``validate``/``test``/
+    ``predict``), not always ``"fit"``: a datamodule that builds different
+    datasets per stage has to be told which one is starting.
+    """
     dm = getattr(trainer, "datamodule", None)
     if dm is not None and hasattr(dm, "setup"):
-        dm.setup("fit")
+        dm.setup(stage)
+    _call_callback_hooks(trainer, "setup", stage=stage)
+    model = trainer._model
+    if hasattr(model, "setup"):
+        model.setup(stage)
+
+
+def _call_teardown_hook(trainer: Any, stage: str = "fit") -> None:
+    """Call the ``teardown`` hook on the datamodule, the callbacks and the model.
+
+    The mirror image of ``_call_setup_hook``: anything opened in ``setup`` gets
+    a chance to close, whichever entry point ran.
+    """
+    dm = getattr(trainer, "datamodule", None)
+    if dm is not None and hasattr(dm, "teardown"):
+        dm.teardown(stage)
+    _call_callback_hooks(trainer, "teardown", stage=stage)
+    model = getattr(trainer, "_model", None)
+    if model is not None and hasattr(model, "teardown"):
+        model.teardown(stage)
+    if model is not None:
+        model._current_fx_name = None
 
 
 def _call_configure_model(trainer: Any) -> None:
