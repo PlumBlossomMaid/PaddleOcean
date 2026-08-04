@@ -13,6 +13,8 @@ from typing import Any, Optional
 import paddle
 
 from ocean.strategies.ddp import DDPStrategy
+from ocean.utils import MisconfigurationException
+from ocean.utils.rank_zero import rank_zero_warn
 
 
 class DeepSpeedStrategy(DDPStrategy):
@@ -27,10 +29,13 @@ class DeepSpeedStrategy(DDPStrategy):
         **kwargs: Additional DDPStrategy arguments.
     """
 
+    #: Paddle accepts exactly these three sharding levels.
+    VALID_LEVELS = ("os", "os_g", "p_g_os")
+
     ZERO_MAP = {
-        1: "os_g",  # optimizer state sharding
-        2: "os_g2",  # optimizer + gradient sharding
-        3: "p_g",  # parameter sharding (full model sharding)
+        1: "os",  # optimizer state sharding
+        2: "os_g",  # optimizer + gradient sharding
+        3: "p_g_os",  # parameter + gradient + optimizer (full model sharding)
     }
 
     def __init__(
@@ -42,7 +47,14 @@ class DeepSpeedStrategy(DDPStrategy):
     ) -> None:
         super().__init__(**kwargs)
         self.zero_stage = zero_stage
-        self._sharding_level = sharding_level or self.ZERO_MAP.get(zero_stage, "os_g")
+        if zero_stage not in self.ZERO_MAP:
+            raise MisconfigurationException(f"`zero_stage` must be one of {sorted(self.ZERO_MAP)}, got {zero_stage!r}.")
+        self._sharding_level = sharding_level or self.ZERO_MAP[zero_stage]
+        if self._sharding_level not in self.VALID_LEVELS:
+            raise MisconfigurationException(
+                f"`sharding_level` must be one of {list(self.VALID_LEVELS)}, got {self._sharding_level!r}. "
+                "These are the levels PaddlePaddle's group_sharded_parallel accepts."
+            )
         self._offload = offload
         self._fleet_initialized = False
 
@@ -58,8 +70,11 @@ class DeepSpeedStrategy(DDPStrategy):
 
             odist.fleet.init(is_collective=True)
             self._fleet_initialized = True
-        except Exception:
-            pass
+        except Exception as exception:
+            # Reported rather than swallowed: without Fleet the run continues
+            # unsharded, which looks identical to a working setup until memory
+            # or throughput says otherwise.
+            rank_zero_warn(f"Fleet initialization failed, training will not be sharded: {exception!r}")
 
     def _setup_model(self, model: paddle.nn.Layer) -> paddle.nn.Layer:
         """Wrap model with group sharding for ZeRO optimization."""
@@ -70,9 +85,11 @@ class DeepSpeedStrategy(DDPStrategy):
                 model,
                 self._optimizers[0] if self._optimizers else None,
                 level=self._sharding_level,
+                offload=self._offload,
             )
             return model
-        except Exception:
+        except Exception as exception:
+            rank_zero_warn(f"Group sharding failed, the model is NOT sharded: {exception!r}")
             return model
 
     def save_checkpoint(self, checkpoint: dict, filepath: str) -> None:
