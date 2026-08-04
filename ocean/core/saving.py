@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 import paddle
 
+from ocean.utils.rank_zero import rank_zero_warn
+
 CHECKPOINT_HYPER_PARAMS_KEY = "hyper_parameters"
 #: Older checkpoints stored hyperparameters under this key.
 CHECKPOINT_PAST_HYPER_PARAMS_KEYS = ("hparams",)
@@ -89,14 +91,20 @@ def load_from_checkpoint(
 
 
 def save_hparams_to_yaml(hparams: dict[str, Any], path: str) -> None:
-    """Save hyperparameters to a YAML file."""
+    """Save hyperparameters to a YAML file.
+
+    Says so when PyYAML is missing rather than returning as if it had written
+    the file: hyperparameters vanishing without a word is exactly the kind of
+    thing nobody notices until they need them.
+    """
     try:
         import yaml
-
-        with open(path, "w") as f:
-            yaml.dump(dict(hparams), f, default_flow_style=False)
     except ImportError:
-        pass
+        rank_zero_warn(f"PyYAML is not installed, so the hyperparameters were not written to {path!r}.")
+        return
+
+    with open(path, "w") as f:
+        yaml.dump(dict(hparams), f, default_flow_style=False)
 
 
 def load_hparams_from_yaml(path: str) -> dict[str, Any]:
