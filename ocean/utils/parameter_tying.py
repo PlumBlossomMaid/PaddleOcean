@@ -12,16 +12,21 @@ def find_tying_parameters(model: paddle.nn.Layer) -> list[tuple[str, str]]:
         model: The model to check.
 
     Returns:
-        List of (name1, name2) tuples for tied parameter pairs.
+        List of ``(name, other_name)`` tuples, one per extra name a shared
+        parameter is reachable under.
     """
+    # ``remove_duplicate=False`` is the whole point: the default de-duplicates
+    # by tensor, so a shared parameter is listed once under a single name and
+    # the very thing being looked for can never appear.
     param_to_names: dict[int, list[str]] = {}
-    for name, param in model.named_parameters():
-        addr = id(param)
-        if addr not in param_to_names:
-            param_to_names[addr] = []
-        param_to_names[addr].append(name)
+    for name, param in model.named_parameters(remove_duplicate=False):
+        param_to_names.setdefault(id(param), []).append(name)
 
-    return [(names[0], names[1]) for names in param_to_names.values() if len(names) > 1]
+    tied: list[tuple[str, str]] = []
+    for names in param_to_names.values():
+        first = names[0]
+        tied.extend((first, other) for other in names[1:])
+    return tied
 
 
 def assert_no_tying_parameters(model: paddle.nn.Layer) -> None:
