@@ -23,43 +23,42 @@ class WeightAveraging(Callback):
         self.avg_type = avg_type
         self.decay = decay
         self.start_epoch = start_epoch
-        self._avg_model: Optional[Any] = None
+        self._avg_state: Optional[dict[str, Any]] = None
         self._n_averaged = 0
 
     def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
         if trainer.current_epoch < self.start_epoch:
             return
-        if self._avg_model is None:
-            self._avg_model = self._copy_model(model)
+        if self._avg_state is None:
+            self._avg_state = {k: v.clone() for k, v in model.state_dict().items()}
             self._n_averaged = 1
             return
 
         self._n_averaged += 1
+        parameter_names = {name for name, _ in model.named_parameters()}
         with paddle.no_grad():
-            for avg_param, param in zip(self._avg_model.parameters(), model.parameters()):
+            for name, value in model.state_dict().items():
+                if name not in self._avg_state:
+                    continue
+                if name not in parameter_names or not paddle.is_floating_point(value):
+                    # Buffers (batch-norm statistics, counters) track the latest
+                    # weights rather than being blended.
+                    self._avg_state[name] = value.clone()
+                    continue
+                averaged = self._avg_state[name]
                 if self.avg_type == "ema":
-                    avg_param.set_value(self.decay * avg_param + (1 - self.decay) * param)
+                    averaged.set_value(self.decay * averaged + (1 - self.decay) * value)
                 else:
                     n = self._n_averaged
-                    avg_param.set_value(avg_param * (n - 1) / n + param * (1 / n))
+                    averaged.set_value(averaged * (n - 1) / n + value * (1 / n))
 
     def on_train_end(self, trainer: Any, model: Any) -> None:
-        if self._avg_model is not None:
-            model.set_state_dict(self._avg_model.state_dict())
-
-    def _copy_model(self, model: Any) -> Any:
-        import copy
-
-        return copy.deepcopy(model)
+        if self._avg_state is not None:
+            model.set_state_dict(self._avg_state)
 
     def state_dict(self) -> dict:
-        return {
-            "n_averaged": self._n_averaged,
-            "avg_model_state": self._avg_model.state_dict() if self._avg_model else None,
-        }
+        return {"n_averaged": self._n_averaged, "avg_model_state": self._avg_state}
 
     def load_state_dict(self, state_dict: dict) -> None:
         self._n_averaged = state_dict.get("n_averaged", 0)
-        avg_state = state_dict.get("avg_model_state")
-        if avg_state is not None and self._avg_model is not None:
-            self._avg_model.set_state_dict(avg_state)
+        self._avg_state = state_dict.get("avg_model_state")
