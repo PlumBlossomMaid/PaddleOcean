@@ -14,6 +14,7 @@ from typing import Any, Optional
 import paddle
 
 from ocean.strategies.parallel import ParallelStrategy
+from ocean.utils.rank_zero import rank_zero_warn
 
 
 class DDPStrategy(ParallelStrategy):
@@ -253,15 +254,22 @@ class DDPStrategy(ParallelStrategy):
     # ==================================================================
 
     def reduce(self, tensor: Any, reduce_op: str = "mean", group: Any = None) -> Any:
-        """Reduce a tensor across all processes."""
+        """Reduce a tensor across all processes, in place.
+
+        ``all_reduce`` sums into the caller's tensor, so a mean has to be scaled
+        back into that same tensor: dividing into a new one left every caller
+        that relied on the in-place result holding the *sum*.
+        """
         if not self._is_initialized or not isinstance(tensor, paddle.Tensor):
             return tensor
         try:
             paddle.distributed.all_reduce(tensor)
             if reduce_op == "mean":
-                tensor = tensor / self._world_size
-        except Exception:
-            pass
+                paddle.assign(tensor / self._world_size, tensor)
+        except Exception as exception:
+            # A metric that failed to synchronise reads exactly like one that
+            # did; say so rather than hand back the local value in silence.
+            rank_zero_warn(f"Reduction across processes failed, the value is rank-local: {exception!r}")
         return tensor
 
     def all_reduce(self, tensor: Any, op: str = "mean") -> Any:
@@ -269,17 +277,24 @@ class DDPStrategy(ParallelStrategy):
         return self.reduce(tensor, op)
 
     def broadcast(self, obj: Any, src: int = 0) -> Any:
-        """Broadcast a tensor from source process to all others."""
+        """Broadcast a tensor or a plain Python object from ``src`` to all ranks.
+
+        ``broadcast_object_list`` mutates the list it is given and returns
+        ``None``. Subscripting that return value raised, the raise was swallowed,
+        and every rank got its own object back — a broadcast that broadcast
+        nothing, which is how ranks end up disagreeing about whether to stop.
+        """
         if not self._is_initialized:
             return obj
         try:
             if isinstance(obj, paddle.Tensor):
                 paddle.distributed.broadcast(obj, src=src)
             else:
-                paddle.distributed.broadcast_object_list([obj], src=src)
-                obj = paddle.distributed.broadcast_object_list([obj], src=src)[0]
-        except Exception:
-            pass
+                holder = [obj]
+                paddle.distributed.broadcast_object_list(holder, src=src)
+                obj = holder[0]
+        except Exception as exception:
+            rank_zero_warn(f"Broadcast failed, the value is rank-local: {exception!r}")
         return obj
 
     def all_gather(self, tensor: Any, group: Any = None, sync_grads: bool = False) -> Any:
