@@ -569,12 +569,6 @@ class Trainer:
 
         _verify_strategy_supports_compile(model, self.strategy)
 
-        # Convert BatchNorm layers before the model is placed or wrapped: a flag
-        # that was collected and never acted on left every batch-norm layer
-        # computing statistics from its own device only.
-        if self.sync_batchnorm:
-            self._layer_sync.sync(model)
-
         # Attach data
         self._data_connector.attach_data(model, train_dataloaders, val_dataloaders, datamodule=datamodule)
 
@@ -585,6 +579,20 @@ class Trainer:
         # Strategy setup
         self.strategy.connect(model)
         self.strategy.setup_environment()
+
+        # Convert BatchNorm after the process group exists, and only when there
+        # is more than one process to synchronise with: SyncBatchNorm has no
+        # meaning across a single device, and its kernel is not even registered
+        # on some CPU builds, so converting anyway trades a no-op flag for a
+        # crash.
+        if self.sync_batchnorm:
+            if self.strategy.world_size > 1:
+                self._layer_sync.sync(model)
+            else:
+                rank_zero_warn(
+                    "`Trainer(sync_batchnorm=True)` has no effect with a single process; "
+                    "batch-norm statistics are already computed over the whole batch."
+                )
 
         # Setup hooks
         _call_setup_hook(self)

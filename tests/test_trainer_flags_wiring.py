@@ -98,10 +98,31 @@ def test_without_overfit_shuffling_is_left_alone():
 # ── sync_batchnorm ───────────────────────────────────────────────────────────
 
 
-def test_sync_batchnorm_converts_the_layers():
+def test_sync_batchnorm_converts_the_layers(monkeypatch):
+    """Applied only when there is more than one process to synchronise with."""
+    calls = []
+
+    class SpySync(LayerSync):
+        def sync(self, model):
+            calls.append(type(model).__name__)
+
+    trainer = make_trainer(max_epochs=1, sync_batchnorm=True, plugins=[SpySync()])
+    monkeypatch.setattr(type(trainer.strategy), "world_size", property(lambda self: 2))
+    trainer.fit(CountingModel(), train_dataloaders=make_loader())
+
+    assert calls == ["CountingModel"]
+
+
+def test_sync_batchnorm_is_a_no_op_on_one_process(capsys):
+    """SyncBatchNorm across a single device means nothing, and on some CPU
+    builds its kernel is not registered at all — converting would trade a
+    do-nothing flag for a crash."""
     model = CountingModel()
     make_trainer(max_epochs=1, sync_batchnorm=True).fit(model, train_dataloaders=make_loader())
-    assert isinstance(model.bn, paddle.nn.SyncBatchNorm)
+
+    assert isinstance(model.bn, paddle.nn.BatchNorm1D)
+    assert not isinstance(model.bn, paddle.nn.SyncBatchNorm)
+    assert "no effect with a single process" in capsys.readouterr().out
 
 
 def test_without_the_flag_batch_norm_is_untouched():
@@ -125,16 +146,13 @@ def test_precision_plugin_overrides_the_precision_string():
     assert trainer.strategy.precision_plugin.precision == "16-mixed"
 
 
-def test_layer_sync_plugin_is_used_for_sync_batchnorm():
-    calls = []
-
+def test_layer_sync_plugin_is_installed():
     class SpySync(LayerSync):
         def sync(self, model):
-            calls.append(type(model).__name__)
+            pass
 
-    model = CountingModel()
-    make_trainer(max_epochs=1, sync_batchnorm=True, plugins=[SpySync()]).fit(model, train_dataloaders=make_loader())
-    assert calls == ["CountingModel"]
+    plugin = SpySync()
+    assert make_trainer(plugins=[plugin])._layer_sync is plugin
 
 
 def test_unknown_plugin_is_reported(capsys):
