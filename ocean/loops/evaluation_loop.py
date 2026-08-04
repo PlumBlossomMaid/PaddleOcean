@@ -95,7 +95,9 @@ class _EvaluationLoop(_Loop):
             for dl_idx, dataloader in enumerate(dataloaders):
                 max_batches = trainer._resolve_limit(dataloader, limit, stage=mode)
                 for batch_idx, batch in enumerate(dataloader):
-                    if max_batches and batch_idx >= max_batches:
+                    # A cap of 0 means zero batches, not "no cap" — hence the
+                    # direct comparison instead of a truthiness guard.
+                    if batch_idx >= max_batches:
                         break
                     device = trainer._resolve_device()
                     batch = trainer._move_to_device(batch, device)

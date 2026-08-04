@@ -1125,12 +1125,6 @@ class Trainer:
     def _should_stop(self) -> bool:
         return self.should_stop or (0 < self.max_steps <= self._dataloader_step)
 
-    def _should_limit_batches(self, batch_idx: int, mode: str) -> bool:
-        limit = getattr(self, f"limit_{mode}_batches", 1.0)
-        if isinstance(limit, int):
-            return batch_idx >= limit
-        return False
-
     def _sanity_check(self, model: Any, device: Any) -> None:
         """Run sanity check.
 

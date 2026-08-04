@@ -1,5 +1,6 @@
 """Trainer setup utilities - configuration validation and debug flags."""
 
+from datetime import timedelta
 from typing import Any
 
 from ocean.utils import MisconfigurationException
@@ -50,11 +51,45 @@ def _init_debugging_flags(
             "Logging and checkpointing is suppressed."
         )
 
+    else:
+        trainer.limit_train_batches = _determine_batch_limits(limit_train_batches, "limit_train_batches")
+        trainer.limit_val_batches = _determine_batch_limits(limit_val_batches, "limit_val_batches")
+        trainer.limit_test_batches = _determine_batch_limits(limit_test_batches, "limit_test_batches")
+        trainer.limit_predict_batches = _determine_batch_limits(limit_predict_batches, "limit_predict_batches")
+        # A time-based interval is a duration, not a batch count; the loops parse
+        # it separately.
+        if not isinstance(val_check_interval, (str, timedelta, dict)):
+            trainer.val_check_interval = _determine_batch_limits(val_check_interval, "val_check_interval")
+
     if overfit_batches:
         if isinstance(overfit_batches, (int, float)):
             trainer.limit_train_batches = overfit_batches
             trainer.limit_val_batches = overfit_batches
         trainer.overfit_batches = overfit_batches
+
+
+def _determine_batch_limits(batches: Any, name: str) -> Any:
+    """Validate a batch-limit argument and return it normalised.
+
+    A limit is either a fraction in ``[0.0, 1.0]`` or a whole number of batches.
+    Anything else was previously stored as given and only surfaced far away:
+    ``limit_train_batches=-1`` resolved to a cap of -1 and trained zero batches
+    while reporting a completed run, and a string blew up deep inside the loop
+    with an unrelated message (``int('x' * 8)``).
+    """
+    if batches is None:
+        return 1.0
+    if isinstance(batches, bool) or not isinstance(batches, (int, float)):
+        raise MisconfigurationException(
+            f"You have passed invalid value {batches!r} for {name}, it has to be in [0.0, 1.0] or an int."
+        )
+    if 0 <= batches <= 1:
+        return batches
+    if batches > 1 and batches % 1.0 == 0:
+        return int(batches)
+    raise MisconfigurationException(
+        f"You have passed invalid value {batches} for {name}, it has to be in [0.0, 1.0] or an int."
+    )
 
 
 def _verify_loop_configurations(trainer: Any) -> None:
