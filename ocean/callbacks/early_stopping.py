@@ -77,47 +77,42 @@ class EarlyStopping(Callback):
                 raise RuntimeError(f"EarlyStopping: metric '{self.monitor}' not found in logs")
             return
 
-        current = logs[self.monitor]
+        should_stop, reason = self._evaluate_stopping_criteria(logs[self.monitor])
 
-        # check_finite: stop if NaN or Inf (ocean-compatible)
-        if self.check_finite and not math.isfinite(current):
-            trainer.should_stop = True
-            self.stopped_epoch = trainer.current_epoch
-            if self.verbose:
-                print(f"EarlyStopping: {self.monitor}={current} is not finite, stopping")
+        # Every rank has to reach the same answer. Deciding locally means some
+        # ranks leave the loop while others wait at the next collective, which
+        # does not stop training — it hangs it. ``all=False`` so one rank asking
+        # to stop is enough, matching the reference.
+        should_stop = trainer.strategy.reduce_boolean_decision(should_stop, all=False)
+        if not should_stop:
             return
 
-        # divergence_threshold: stop if metric diverges beyond threshold
+        trainer.should_stop = True
+        self.stopped_epoch = trainer.current_epoch
+        if reason and self.verbose:
+            print(reason)
+
+    def _evaluate_stopping_criteria(self, current: float) -> tuple[bool, Optional[str]]:
+        """Decide locally whether to stop, and say why.
+
+        Split out from the check so the decision can be reduced across ranks in
+        one place instead of each branch setting ``should_stop`` on its own.
+        """
+        if self.check_finite and not math.isfinite(current):
+            return True, f"EarlyStopping: {self.monitor}={current} is not finite, stopping"
+
         if self.divergence_threshold is not None:
-            if self.mode == "min" and current >= self.divergence_threshold:
-                trainer.should_stop = True
-                self.stopped_epoch = trainer.current_epoch
-                if self.verbose:
-                    print(f"EarlyStopping: {self.monitor}={current} diverged beyond {self.divergence_threshold}")
-                return
-            elif self.mode == "max" and current <= self.divergence_threshold:
-                trainer.should_stop = True
-                self.stopped_epoch = trainer.current_epoch
-                if self.verbose:
-                    print(f"EarlyStopping: {self.monitor}={current} diverged beyond {self.divergence_threshold}")
-                return
+            diverged = (
+                current >= self.divergence_threshold if self.mode == "min" else current <= self.divergence_threshold
+            )
+            if diverged:
+                return True, f"EarlyStopping: {self.monitor}={current} diverged beyond {self.divergence_threshold}"
 
-        # stopping_threshold: stop immediately if metric reaches threshold
         if self.stopping_threshold is not None:
-            if self.mode == "min" and current <= self.stopping_threshold:
-                trainer.should_stop = True
-                self.stopped_epoch = trainer.current_epoch
-                if self.verbose:
-                    print(f"EarlyStopping: {self.monitor}={current} reached stopping threshold")
-                return
-            elif self.mode == "max" and current >= self.stopping_threshold:
-                trainer.should_stop = True
-                self.stopped_epoch = trainer.current_epoch
-                if self.verbose:
-                    print(f"EarlyStopping: {self.monitor}={current} reached stopping threshold")
-                return
+            reached = current <= self.stopping_threshold if self.mode == "min" else current >= self.stopping_threshold
+            if reached:
+                return True, f"EarlyStopping: {self.monitor}={current} reached stopping threshold"
 
-        # min_delta: minimum change to qualify as improvement (ocean-compatible)
         if self.mode == "min":
             improved = current < self.best_score - self.min_delta
         else:
@@ -126,13 +121,12 @@ class EarlyStopping(Callback):
         if improved:
             self.best_score = current
             self.wait_count = 0
-        else:
-            self.wait_count += 1
-            if self.wait_count >= self.patience:
-                self.stopped_epoch = trainer.current_epoch
-                trainer.should_stop = True
-                if self.verbose:
-                    print(f"EarlyStopping: {self.monitor} did not improve for {self.patience} checks")
+            return False, None
+
+        self.wait_count += 1
+        if self.wait_count >= self.patience:
+            return True, f"EarlyStopping: {self.monitor} did not improve for {self.patience} checks"
+        return False, None
 
     @property
     def state_key(self) -> str:

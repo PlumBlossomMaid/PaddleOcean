@@ -33,11 +33,21 @@ class _FakeClock:
         self.t += dt
 
 
+class _SingleProcessStrategy:
+    """Stand-in for the strategy: on one process a broadcast is the identity."""
+
+    def broadcast(self, obj, src: int = 0):
+        return obj
+
+
 class _Trainer:
     """Minimal stand-in exposing the attributes Timer touches."""
 
     def __init__(self) -> None:
         self.should_stop = False
+        # Timer reduces its stop decision across ranks, so it needs a strategy —
+        # a real Trainer always has one.
+        self.strategy = _SingleProcessStrategy()
 
 
 @pytest.fixture
