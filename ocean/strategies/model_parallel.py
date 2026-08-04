@@ -9,6 +9,7 @@ from typing import Any, Optional
 import paddle
 
 from ocean.strategies.parallel import ParallelStrategy
+from ocean.utils.rank_zero import rank_zero_warn
 
 
 class ModelParallelStrategy(ParallelStrategy):
@@ -45,11 +46,14 @@ class ModelParallelStrategy(ParallelStrategy):
         """Setup with ProcessMesh for model parallelism."""
         super().setup(trainer)
         try:
-            mesh_dims = [self.tensor_parallel_size, self.data_parallel_size]
+            # pipeline_parallel_size was accepted and then left out of the mesh,
+            # so a pipeline dimension was silently dropped.
+            mesh_dims = [self.pipeline_parallel_size, self.tensor_parallel_size, self.data_parallel_size]
+            mesh_dims = [d for d in mesh_dims if d > 1] or [1]
             self._mesh = paddle.distributed.ProcessMesh(mesh_dims)
             paddle.distributed.set_mesh(self._mesh)
-        except Exception:
-            pass
+        except Exception as exception:
+            rank_zero_warn(f"Could not build the process mesh, model parallelism is NOT active: {exception!r}")
 
     def reduce(self, tensor: Any, reduce_op: str = "mean") -> Any:
         return tensor

@@ -144,6 +144,21 @@ class DDPStrategy(ParallelStrategy):
     #   3. rank_zero_only.rank = global_rank         → rank filter
     # ------------------------------------------------------------------
 
+    def _apply_process_group_backend(self) -> None:
+        """Honour ``process_group_backend`` before the process group is created.
+
+        PaddlePaddle selects the backend from the ``PADDLE_DISTRI_BACKEND``
+        environment variable rather than from an argument to
+        ``init_parallel_env()``, so the requested backend has to be published
+        there. It used to be stored on the strategy and never read, which meant
+        asking for ``"gloo"`` silently gave you the default.
+        """
+        if not self._process_group_backend:
+            return
+        import os
+
+        os.environ["PADDLE_DISTRI_BACKEND"] = self._process_group_backend
+
     def setup_environment(self) -> None:
         """Set up distributed environment: device + process group.
 
@@ -164,6 +179,7 @@ class DDPStrategy(ParallelStrategy):
         if not self._is_initialized:
             try:
                 if paddle.distributed.is_available():
+                    self._apply_process_group_backend()
                     paddle.distributed.init_parallel_env()
                     self._is_initialized = True
                     self._rank = paddle.distributed.get_rank()
