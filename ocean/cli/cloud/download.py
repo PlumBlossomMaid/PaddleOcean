@@ -219,7 +219,7 @@ def _list_all_files(repo_id: str, revision: str, token: str | None):
     # Get the commit SHA for the revision (branch/tag)
     tag_url = f"{git_host}/api/v1/repos/{url_encoded_repo}/tags/{quote(revision, safe='')}"
     tag_resp = requests.get(tag_url, headers=headers, timeout=30)
-    if tag_resp.status_code in (401, 403):
+    if tag_resp.status_code in (401, 403) and token is None:
         raise click.ClickException(_auth_hint())
     if tag_resp.status_code == 200:
         revision_sha = tag_resp.json()["commit"]["sha"]
@@ -238,7 +238,7 @@ def _list_all_files(repo_id: str, revision: str, token: str | None):
             f"?recursive=true&page={page}&per_page={per_page}"
         )
         resp = requests.get(tree_url, headers=headers, timeout=30)
-        if resp.status_code in (401, 403):
+        if resp.status_code in (401, 403) and token is None:
             raise click.ClickException(_auth_hint())
         if resp.status_code not in (200, 201):
             raise click.ClickException(f"Failed to list repo: {resp.status_code} {resp.text[:200]}")
