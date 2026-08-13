@@ -12,7 +12,7 @@ import click
 import requests
 
 from ocean.cli.cloud._config import GIT_HOST
-from ocean.cli.cloud.auth import get_token
+from ocean.cli.cloud.auth import get_token_optional
 from ocean.cli.cloud.upload import _header_fill
 
 
@@ -44,7 +44,7 @@ def list_files(
     Returns:
         List of file info dicts with keys: name, type (file/dir), size, path.
     """
-    token = token or get_token()
+    token = token or get_token_optional()
     path = path.strip("/")
 
     # Build URL
