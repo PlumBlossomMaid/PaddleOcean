@@ -529,6 +529,8 @@ class _AcceleratorConnector:
         if accelerator == "gpu":
             if CUDAAccelerator.is_available():
                 return CUDAAccelerator()
+            if CustomDeviceAccelerator.is_available():
+                return CustomDeviceAccelerator()
             raise RuntimeError("GPU requested but CUDA not available")
         if accelerator == "rocm":
             return ROCmAccelerator()
