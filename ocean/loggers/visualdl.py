@@ -36,6 +36,7 @@ class VisualDLLogger(Logger):
         self._version = version
         self._prefix = prefix
         self._experiment = None
+        self._step = 0
 
     @property
     def name(self) -> str:
@@ -81,7 +82,9 @@ class VisualDLLogger(Logger):
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None) -> None:
         """Log metrics — only writes on rank 0."""
         if step is None:
-            step = len(self._metrics) if hasattr(self, "_metrics") else 0
+            step = self._step if hasattr(self, "_step") else 0
+            if hasattr(self, "_step"):
+                self._step += 1
         for k, v in metrics.items():
             key = f"{self._prefix}/{k}" if self._prefix else k
             if hasattr(v, "item"):
@@ -104,7 +107,18 @@ class VisualDLLogger(Logger):
 
     @rank_zero_only
     def save(self) -> None:
-        pass
+        """Flush VisualDL writer to disk."""
+        if self._experiment is not None:
+            try:
+                self._experiment.save()
+            except AttributeError:
+                # VisualDL LogWriter doesn't have save(), try flush
+                try:
+                    self._experiment.flush()
+                except AttributeError:
+                    pass
+            except Exception:
+                pass
 
     @rank_zero_only
     def finalize(self, status: str) -> None:

@@ -108,11 +108,18 @@ def save_hparams_to_yaml(hparams: dict[str, Any], path: str) -> None:
 
 
 def load_hparams_from_yaml(path: str) -> dict[str, Any]:
-    """Load hyperparameters from a YAML file."""
+    """Load hyperparameters from a YAML file.
+
+    Raises ``ImportError`` if PyYAML is not installed, rather than silently
+    returning an empty dict — callers would treat the empty result as "no
+    hyperparameters" and proceed without any of the values they expected.
+    """
     try:
         import yaml
+    except ImportError as e:
+        raise ImportError(
+            "PyYAML is required to load hyperparameters from YAML files. Install it with `pip install pyyaml`."
+        ) from e
 
-        with open(path, "r") as f:
-            return yaml.safe_load(f) or {}
-    except ImportError:
-        return {}
+    with open(path) as f:
+        return yaml.safe_load(f) or {}

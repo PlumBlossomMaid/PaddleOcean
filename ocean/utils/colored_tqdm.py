@@ -1,8 +1,10 @@
 import os
+import sys
 
 from tqdm import tqdm
 
-os.system("")  # Compatible with Windows
+if sys.platform == "win32":
+    os.system("")  # Enable ANSI escape sequences on Windows consoles
 
 
 def hex_to_ansi(hex_color: str, background: bool = False) -> str:

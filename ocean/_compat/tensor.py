@@ -257,7 +257,7 @@ def unique(
         return paddle.unique(x, return_inverse=return_inverse, return_counts=return_counts, axis=axis)
     # Fallback for very old versions
     flat = x.flatten()
-    sorted_t, _ = paddle.sort(flat)
+    sorted_t, _ = sort(flat)  # use local sort() which returns (tensor, indices)
     mask = sorted_t[1:] != sorted_t[:-1]
     mask = paddle.concat([paddle.to_tensor([True]), mask])
     uniq = sorted_t[mask]
@@ -306,8 +306,11 @@ def logsumexp(x: paddle.Tensor, axis: Optional[int] = None, keepdim: bool = Fals
     if axis is None:
         x_max = x.max()
         return x_max + (x - x_max).exp().sum().log()
+    # Compute with keepdim=True throughout, then squeeze if needed
     x_max = x.max(axis=axis, keepdim=True)
-    result = x_max + (x - x_max).exp().sum(axis=axis, keepdim=keepdim).log()
+    result = x_max + (x - x_max).exp().sum(axis=axis, keepdim=True).log()
+    if not keepdim:
+        result = result.squeeze(axis=axis)
     return result
 
 

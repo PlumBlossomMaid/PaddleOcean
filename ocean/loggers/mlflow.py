@@ -144,6 +144,18 @@ class MLFlowLogger(Logger):
             rank_zero_warn(f"MLFlowLogger.log_metrics failed: {e}")
 
     @rank_zero_only
+    def save(self) -> None:
+        """Flush MLFlow run data to disk."""
+        try:
+            import mlflow
+
+            if mlflow.active_run() is not None:
+                mlflow.flush()
+        except (AttributeError, Exception):
+            # mlflow.flush() may not exist in older versions; end_run in finalize handles cleanup
+            pass
+
+    @rank_zero_only
     def finalize(self, status: str = "success") -> None:
         try:
             import mlflow

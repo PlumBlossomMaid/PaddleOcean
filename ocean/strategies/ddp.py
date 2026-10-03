@@ -191,8 +191,12 @@ class DDPStrategy(ParallelStrategy):
                         self._node_rank = int(env.node_rank)
                     except Exception:
                         self._local_rank = self._rank
-            except Exception:
-                pass
+            except Exception as e:
+                from ocean.utils.rank_zero import rank_zero_warn
+
+                rank_zero_warn(
+                    f"DDPStrategy: distributed init failed ({e!r}); training will run in single-process mode."
+                )
 
         # Step 2: Set device for this process via accelerator
         if self._accelerator:
@@ -259,11 +263,20 @@ class DDPStrategy(ParallelStrategy):
         ``all_reduce`` sums into the caller's tensor, so a mean has to be scaled
         back into that same tensor: dividing into a new one left every caller
         that relied on the in-place result holding the *sum*.
+
+        Supported reduce ops: ``"mean"``, ``"sum"``, ``"min"``, ``"max"``.
         """
         if not self._is_initialized or not isinstance(tensor, paddle.Tensor):
             return tensor
+        reduce_op_map = {
+            "sum": paddle.distributed.ReduceOp.SUM,
+            "mean": paddle.distributed.ReduceOp.SUM,  # divide by world_size below
+            "min": paddle.distributed.ReduceOp.MIN,
+            "max": paddle.distributed.ReduceOp.MAX,
+        }
+        dist_op = reduce_op_map.get(reduce_op, paddle.distributed.ReduceOp.SUM)
         try:
-            paddle.distributed.all_reduce(tensor)
+            paddle.distributed.all_reduce(tensor, op=dist_op)
             if reduce_op == "mean":
                 paddle.assign(tensor / self._world_size, tensor)
         except Exception as exception:
@@ -382,7 +395,10 @@ class DDPStrategy(ParallelStrategy):
         try:
             ckpt = paddle.load(checkpoint_path)
             return ckpt
-        except Exception:
+        except Exception as e:
+            from ocean.utils.rank_zero import rank_zero_warn
+
+            rank_zero_warn(f"DDPStrategy: could not load checkpoint '{checkpoint_path}': {e!r}")
             return {}
 
     # ==================================================================
@@ -432,3 +448,4 @@ class DDPStrategy(ParallelStrategy):
                 paddle.distributed.barrier()
             except Exception:
                 pass
+        super().teardown()

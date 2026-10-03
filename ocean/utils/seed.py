@@ -40,7 +40,8 @@ def seed_everything(
         if benchmark is None:
             benchmark = False
         elif benchmark:
-            print("Warning: deterministic=True and benchmark=True are incompatible")
+            print("Warning: deterministic=True and benchmark=True are incompatible; forcing benchmark=False")
+            benchmark = False
 
     if benchmark is not None:
         try:

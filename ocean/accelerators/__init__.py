@@ -7,3 +7,14 @@ from ocean.accelerators.custom_device import CustomDeviceAccelerator
 from ocean.accelerators.ipu import IPUAccelerator
 from ocean.accelerators.rocm import ROCmAccelerator
 from ocean.accelerators.xpu import XPUAccelerator
+
+__all__ = [
+    "Accelerator",
+    "CPUAccelerator",
+    "CUDAAccelerator",
+    "GPUAccelerator",
+    "CustomDeviceAccelerator",
+    "IPUAccelerator",
+    "ROCmAccelerator",
+    "XPUAccelerator",
+]

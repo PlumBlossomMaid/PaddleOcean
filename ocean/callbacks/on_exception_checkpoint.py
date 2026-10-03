@@ -21,6 +21,9 @@ class OnExceptionCheckpoint(Callback):
         os.makedirs(dirpath, exist_ok=True)
 
     def on_exception(self, trainer: Any, model: Any, exception: BaseException) -> None:
+        if not getattr(trainer, "is_global_zero", True):
+            return
+
         import os
 
         import paddle

@@ -19,28 +19,40 @@ Core types exposed here for convenience:
 
 from __future__ import annotations
 
-from paddlemetrics import *  # noqa: F403 — re-export what paddlemetrics exposes in __all__
-from paddlemetrics.aggregation import (  # noqa: F401
-    CatMetric,
-    MaxMetric,
-    MeanMetric,
-    MinMetric,
-    RunningMean,
-    RunningSum,
-    SumMetric,
-)
-from paddlemetrics.collections import MetricCollection  # noqa: F401
-from paddlemetrics.metric import CompositionalMetric, Metric  # noqa: F401
+try:
+    from paddlemetrics import *  # noqa: F403
+    from paddlemetrics.aggregation import (  # noqa: F401
+        CatMetric,
+        MaxMetric,
+        MeanMetric,
+        MinMetric,
+        RunningMean,
+        RunningSum,
+        SumMetric,
+    )
+    from paddlemetrics.collections import MetricCollection  # noqa: F401
+    from paddlemetrics.metric import CompositionalMetric, Metric  # noqa: F401
 
-__all__ = [
-    "Metric",
-    "CompositionalMetric",
-    "MetricCollection",
-    "CatMetric",
-    "MaxMetric",
-    "MeanMetric",
-    "MinMetric",
-    "RunningMean",
-    "RunningSum",
-    "SumMetric",
-]
+    __all__ = [
+        "Metric",
+        "CompositionalMetric",
+        "MetricCollection",
+        "CatMetric",
+        "MaxMetric",
+        "MeanMetric",
+        "MinMetric",
+        "RunningMean",
+        "RunningSum",
+        "SumMetric",
+    ]
+except ImportError:
+    __all__ = []
+    import warnings
+
+    warnings.warn(
+        "paddlemetrics is not installed. Install it with "
+        "'pip install paddlemetrics' to use ocean.metrics. "
+        "See https://github.com/PlumBlossomMaid/PaddleMetrics for details.",
+        UserWarning,
+        stacklevel=2,
+    )

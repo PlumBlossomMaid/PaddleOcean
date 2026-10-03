@@ -133,5 +133,25 @@ class CometLogger(Logger):
             rank_zero_warn(f"CometLogger.finalize failed: {e}")
 
     @rank_zero_only
+    def save(self) -> None:
+        """Flush Comet experiment data to disk."""
+        try:
+            self.experiment.flush()
+        except (AttributeError, Exception):
+            pass
+
+    @rank_zero_only
     def log_graph(self, model: Any, input_array: Any = None) -> None:
-        pass
+        """Log the model graph to Comet.
+
+        Currently not implemented for PaddlePaddle models (requires ONNX export
+        or model topology extraction). Logs a warning instead.
+        """
+        import warnings
+
+        warnings.warn(
+            "CometLogger.log_graph is not yet implemented for PaddlePaddle models. "
+            "Use `ocean model export -f onnx` to export the model graph separately.",
+            UserWarning,
+            stacklevel=2,
+        )

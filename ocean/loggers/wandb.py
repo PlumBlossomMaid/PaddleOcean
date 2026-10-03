@@ -127,6 +127,17 @@ class WandbLogger(Logger):
             rank_zero_warn(f"WandbLogger.log_hyperparams failed: {e}")
 
     @rank_zero_only
+    def save(self) -> None:
+        """Save WandB run data to disk."""
+        try:
+            import wandb
+
+            if wandb.run is not None:
+                wandb.save()
+        except Exception:
+            pass
+
+    @rank_zero_only
     def finalize(self, status: str) -> None:
         try:
             import wandb

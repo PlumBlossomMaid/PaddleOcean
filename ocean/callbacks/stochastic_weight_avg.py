@@ -81,10 +81,11 @@ class StochasticWeightAveraging(Callback):
         return self.swa_epoch_start
 
     def on_fit_start(self, trainer: Any, model: Any) -> None:
-        self._n_averaged = 0
-        self._average_state = None
-        self._initial_lrs = []
-        self._swa_started = False
+        # Only reset on a fresh fit, not on checkpoint resume —
+        # load_state_dict may have already restored SWA state.
+        if not self._swa_started and self._n_averaged == 0:
+            self._average_state = None
+            self._initial_lrs = []
 
     def on_train_epoch_start(self, trainer: Any, model: Any) -> None:
         """Anneal the learning rate once the SWA phase has begun."""

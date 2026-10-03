@@ -25,9 +25,9 @@ def multiplicative(epoch: int) -> float:
 def _flatten_modules(modules: Union[Layer, Iterable]) -> list:
     """Flatten a module (or iterable of modules) into its leaf/parameter-bearing layers.
 
-    Mirrors the reference ``flatten_modules``: keep leaf layers plus any parent
-    layer that directly owns parameters, so ``parameters(include_sublayers=False)``
-    on each returned layer never double-counts a parameter.
+    Keep leaf layers plus any parent layer that directly owns parameters,
+    so ``parameters(include_sublayers=False)`` on each returned layer never
+    double-counts a parameter.
     """
     if isinstance(modules, Layer):
         flat = modules.sublayers(include_self=True)

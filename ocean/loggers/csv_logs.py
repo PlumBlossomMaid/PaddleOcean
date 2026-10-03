@@ -103,6 +103,8 @@ class CSVLogger(Logger):
     @rank_zero_only
     def save(self) -> None:
         self.experiment.save()
+        # Clear accumulated metrics to prevent unbounded memory growth
+        self._metrics.clear()
 
     @rank_zero_only
     def finalize(self, status: str) -> None:

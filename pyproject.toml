@@ -7,11 +7,40 @@ build-backend = "setuptools.build_meta"
 name = "paddleocean"
 version = "0.1.0"
 description = "A high-level PaddlePaddle framework inspired by PyTorch Lightning"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
+authors = [
+    { name = "PlumBlossomMaid" },
+]
+keywords = ["paddlepaddle", "deep-learning", "training", "lightning", "framework", "gpu"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "click>=8.0",
     "requests>=2.20",
+    "numpy>=1.21",
+    "tqdm>=4.60",
+    "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/PlumBlossomMaid/PaddleOcean"
+Repository = "https://github.com/PlumBlossomMaid/PaddleOcean"
+Documentation = "https://github.com/PlumBlossomMaid/PaddleOcean/blob/master/QWEN.md"
+"Bug Tracker" = "https://github.com/PlumBlossomMaid/PaddleOcean/issues"
 
 [project.scripts]
 ocean = "ocean.cli:main"
@@ -27,6 +56,7 @@ dev = [
     "pre-commit>=3.0",
     "parameterized>=0.9.0",
     "scipy>=1.9.0",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 compat-test = [
     "librosa>=0.10.0",

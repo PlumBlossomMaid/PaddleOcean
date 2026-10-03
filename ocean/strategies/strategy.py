@@ -155,4 +155,7 @@ class Strategy(ABC):
     def teardown(self) -> None:
         if self._model is not None:
             self._model.to(paddle.CPUPlace())
-        self._precision_plugin.teardown()
+        if self._precision_plugin is not None:
+            self._precision_plugin.teardown()
+        if self._accelerator is not None:
+            self._accelerator.teardown()

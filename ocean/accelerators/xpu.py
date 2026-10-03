@@ -55,7 +55,14 @@ class XPUAccelerator(Accelerator):
             paddle.device.set_device("xpu:0")
 
     def teardown(self) -> None:
-        pass
+        """Release cached XPU memory on teardown."""
+        try:
+            import paddle
+
+            if hasattr(paddle.device, "xpu"):
+                paddle.device.xpu.empty_cache()
+        except Exception:
+            pass
 
     @staticmethod
     def parse_devices(devices: Any) -> list[int]:

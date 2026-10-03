@@ -50,3 +50,9 @@ class PredictionWriter(Callback):
             paddle.save(outputs, os.path.join(self.output_dir, f"pred_{dataloader_idx}_{batch_idx}.pdtensor"))
         elif isinstance(outputs, dict):
             paddle.save(outputs, os.path.join(self.output_dir, f"pred_{dataloader_idx}_{batch_idx}.pd"))
+        else:
+            import warnings
+
+            warnings.warn(
+                f"PredictionWriter: outputs of type {type(outputs)} not supported, skipping batch {batch_idx}"
+            )

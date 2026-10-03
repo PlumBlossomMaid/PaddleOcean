@@ -20,7 +20,6 @@ ocean/                          lightning/pytorch/
 │
 ├── DataModule                  数据生命周期
 ├── Gear                        轻量手动训练（对标 Fabric）
-├── gear_wrappers.py            _FabricModule / _FabricOptimizer
 ├── cli.py                      CLI 命令行启动
 ├── distributed.py              70+ Paddle 分布式 API 封装
 │

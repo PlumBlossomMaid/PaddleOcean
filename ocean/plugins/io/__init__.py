@@ -5,6 +5,9 @@ from typing import Any, Optional
 
 import paddle
 
+from ocean.plugins.io.async_plugin import AsyncCheckpointIO
+from ocean.plugins.io.wrapper import WrapperCheckpointIO
+
 
 class CheckpointIO(ABC):
     """Base class for checkpoint IO."""
@@ -35,3 +38,11 @@ class PaddleCheckpointIO(CheckpointIO):
 
         if os.path.exists(path):
             os.remove(path)
+
+
+__all__ = [
+    "CheckpointIO",
+    "PaddleCheckpointIO",
+    "AsyncCheckpointIO",
+    "WrapperCheckpointIO",
+]

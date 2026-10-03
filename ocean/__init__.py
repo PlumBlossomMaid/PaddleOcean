@@ -81,15 +81,27 @@ from ocean._compat.tensor import (
 # Version info
 # ====================================================================
 from ocean._compat.version import PADDLE_VERSION, Version, version_gte, version_lt
-from ocean.accelerators import Accelerator, CPUAccelerator, CUDAAccelerator, GPUAccelerator
+from ocean.accelerators import (
+    Accelerator,
+    CPUAccelerator,
+    CUDAAccelerator,
+    CustomDeviceAccelerator,
+    GPUAccelerator,
+    IPUAccelerator,
+    ROCmAccelerator,
+    XPUAccelerator,
+)
 from ocean.callbacks import (
     BackboneFinetuning,
+    BaseFinetuning,
+    BatchSizeFinder,
     Callback,
     DeviceStatsMonitor,
     EarlyStopping,
     GradientAccumulationScheduler,
     LambdaCallback,
     LearningRateMonitor,
+    LRFinder,
     ModelCheckpoint,
     ModelSummary,
     OnExceptionCheckpoint,
@@ -108,7 +120,16 @@ from ocean.core.optimizer import OceanOptimizer, init_optimizers_and_lr_schedule
 from ocean.core.saving import load_from_checkpoint
 from ocean.datamodule import DataModule
 from ocean.gear import Gear
-from ocean.loggers import CometLogger, CSVLogger, Logger, MLFlowLogger, VisualDLLogger, WandbLogger
+from ocean.loggers import (
+    CometLogger,
+    CSVLogger,
+    DummyLogger,
+    Logger,
+    MLFlowLogger,
+    TensorBoardLogger,
+    VisualDLLogger,
+    WandbLogger,
+)
 from ocean.loggers.ocelogger import OceanLogger, Ocelogger
 from ocean.loops import _EvaluationLoop, _FitLoop, _Loop, _PredictionLoop, _TrainingEpochLoop
 
@@ -116,15 +137,42 @@ from ocean.loops import _EvaluationLoop, _FitLoop, _Loop, _PredictionLoop, _Trai
 # Core ocean framework components
 # ====================================================================
 from ocean.model import Model
-from ocean.plugins import MixedPrecision, Precision
-from ocean.strategies import DDPStrategy, DeepSpeedStrategy, FSDPStrategy, SingleDeviceStrategy, Strategy
+from ocean.plugins import (
+    AsyncCheckpointIO,
+    CheckpointIO,
+    ClusterEnvironment,
+    DoublePrecision,
+    HalfPrecision,
+    LayerSync,
+    MixedPrecision,
+    PaddleCheckpointIO,
+    Precision,
+    SyncBN,
+    WrapperCheckpointIO,
+)
+from ocean.profilers import AdvancedProfiler, PassThroughProfiler, Profiler, SimpleProfiler
+from ocean.strategies import (
+    DDPStrategy,
+    DeepSpeedStrategy,
+    FSDPStrategy,
+    ModelParallelStrategy,
+    ParallelStrategy,
+    SingleDeviceStrategy,
+    Strategy,
+)
 from ocean.trainer import Trainer
 from ocean.trainer.call import _call_callback_hooks, _call_module_hook
 from ocean.trainer.connectors import _CallbackConnector, _CheckpointConnector, _DataConnector, _LoggerConnector
 from ocean.trainer.states import RunningStage, TrainerFn, TrainerState, TrainerStatus
+from ocean.utils.compile import compile as compile
+from ocean.utils.compile import is_compiled, to_static
+from ocean.utils.consolidate_checkpoint import consolidate_checkpoint
 from ocean.utils.enums import OceanEnum
+from ocean.utils.migration import migrate_checkpoint
+from ocean.utils.model_registry import ModelRegistry
 from ocean.utils.seed import seed_everything
 from ocean.utils.types import EVALUATE_OUTPUT, PREDICT_OUTPUT, STEP_OUTPUT
+from ocean.utils.upgrade_checkpoint import upgrade_checkpoint
 
 _patch_sot()
 
@@ -144,6 +192,10 @@ __all__ = [
     "CPUAccelerator",
     "CUDAAccelerator",
     "GPUAccelerator",
+    "CustomDeviceAccelerator",
+    "IPUAccelerator",
+    "ROCmAccelerator",
+    "XPUAccelerator",
     # Callbacks
     "Callback",
     "ModelCheckpoint",
@@ -156,6 +208,7 @@ __all__ = [
     "LambdaCallback",
     "PredictionWriter",
     "BackboneFinetuning",
+    "BaseFinetuning",
     "GradientAccumulationScheduler",
     "OnExceptionCheckpoint",
     "ThroughputMonitor",
@@ -163,10 +216,14 @@ __all__ = [
     "WeightAveraging",
     "ProgressBar",
     "TQDMProgressBar",
+    "BatchSizeFinder",
+    "LRFinder",
     # Loggers
     "Logger",
     "CSVLogger",
+    "DummyLogger",
     "VisualDLLogger",
+    "TensorBoardLogger",
     "WandbLogger",
     "MLFlowLogger",
     "CometLogger",
@@ -176,10 +233,56 @@ __all__ = [
     "DDPStrategy",
     "DeepSpeedStrategy",
     "FSDPStrategy",
+    "ModelParallelStrategy",
+    "ParallelStrategy",
+    "SingleDeviceStrategy",
+    "Strategy",
     # Plugins
+    "Precision",
     "MixedPrecision",
+    "HalfPrecision",
+    "DoublePrecision",
+    "CheckpointIO",
+    "PaddleCheckpointIO",
+    "AsyncCheckpointIO",
+    "WrapperCheckpointIO",
+    "LayerSync",
+    "SyncBN",
+    "ClusterEnvironment",
+    # Profilers
+    "Profiler",
+    "SimpleProfiler",
+    "AdvancedProfiler",
+    "PassThroughProfiler",
+    # Hooks & Mixins
+    "ModelHooks",
+    "DataHooks",
+    "HyperparametersMixin",
+    # Optimizer & Saving
+    "OceanOptimizer",
+    "init_optimizers_and_lr_schedulers",
+    "load_from_checkpoint",
     # Enums
     "OceanEnum",
+    # States
+    "RunningStage",
+    "TrainerFn",
+    "TrainerState",
+    "TrainerStatus",
+    # Types
+    "EVALUATE_OUTPUT",
+    "PREDICT_OUTPUT",
+    "STEP_OUTPUT",
+    # Registry
+    "ModelRegistry",
+    # Checkpoint utilities
+    "consolidate_checkpoint",
+    "upgrade_checkpoint",
+    "migrate_checkpoint",
+    # Compile
+    "to_static",
+    "compile",
+    "is_compiled",
     # Compat APIs
     "repeat_interleave",
     "index_add",
