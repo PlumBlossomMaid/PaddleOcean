@@ -142,3 +142,14 @@ class TensorBoardLogger(Logger):
             except ValueError:
                 continue
         return str(max(versions) + 1) if versions else "0"
+
+    @rank_zero_only
+    def save(self) -> None:
+        """Flush the TensorBoard writer to disk."""
+        if self._experiment is not None:
+            try:
+                self._experiment.flush()
+            except AttributeError:
+                pass
+            except Exception:
+                pass

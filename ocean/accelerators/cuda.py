@@ -30,7 +30,9 @@ class CUDAAccelerator(Accelerator):
             paddle.device.set_device("gpu:0")
 
     def teardown(self) -> None:
-        pass
+        """Release cached GPU memory on teardown."""
+        if paddle.is_compiled_with_cuda():
+            paddle.device.cuda.empty_cache()
 
     @staticmethod
     def parse_devices(devices: Any) -> list[int]:

@@ -45,6 +45,9 @@ def job():
 def submit(name, cmd, path, env, gpus, device, token):
     """Submit a training job to AI Studio.
 
+    Packages the code directory into a zip, uploads it via the BOS ACL endpoint,
+    then creates the training pipeline.
+
     Example:
 
         ocean cloud job submit \\
@@ -80,6 +83,36 @@ def submit(name, cmd, path, env, gpus, device, token):
         return
 
     try:
+        # Step 1: Request BOS upload credentials via the BOSACL endpoint
+        click.echo("Packaging code...")
+        try:
+            bos_resp = _post(_config.PIPELINE_BOSACL_URL, {"name": name}, token)
+            bos_upload_url = bos_resp.get("upload_url") or bos_resp.get("url")
+            bos_token = bos_resp.get("token") or bos_resp.get("authorization")
+        except Exception as e:
+            # BOSACL may not be available in all environments; fall back to
+            # creating the pipeline without a code package (user must upload separately).
+            click.echo(
+                f"Warning: could not obtain BOS upload credentials ({e}), submitting pipeline without code package.",
+                err=True,
+            )
+            bos_upload_url = None
+            bos_token = None
+
+        # Step 2: Upload the zip to BOS if we got credentials
+        if bos_upload_url:
+            import requests as req
+
+            click.echo(f"Uploading code package ({zip_size / 1024 / 1024:.1f} MB)...")
+            headers = {"Content-Type": "application/zip"}
+            if bos_token:
+                headers["Authorization"] = bos_token
+            upload_resp = req.put(bos_upload_url, data=open(zip_path, "rb"), headers=headers, timeout=300)
+            upload_resp.raise_for_status()
+            click.echo("✅ Code uploaded.")
+
+        # Step 3: Create the training pipeline
+        click.echo("Creating pipeline...")
         resp = _post(
             _config.PIPELINE_CREATE_URL,
             {

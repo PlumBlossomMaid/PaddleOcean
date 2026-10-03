@@ -68,13 +68,20 @@ def export(checkpoint, format, output, model_class, input_shape, dynamic_shape):
         return
 
     if format == "paddle":
-        _export_paddle(checkpoint, output)
+        _export_paddle(checkpoint, output, model_class, input_shape)
     elif format == "onnx":
         _export_onnx(checkpoint, output, model_class, input_shape, dynamic_shape)
 
 
-def _export_paddle(checkpoint: str, output: Optional[str]):
-    """Export to PaddlePaddle inference model format."""
+def _export_paddle(
+    checkpoint: str, output: Optional[str], model_class: Optional[str] = None, input_shape: Optional[str] = None
+):
+    """Export to PaddlePaddle inference model format (.pdmodel + .pdiparams).
+
+    If --model-class and --input-shape are provided, produces a static graph
+    inference model via paddle.jit.to_static + paddle.static.save_inference_model.
+    Otherwise, just re-saves the state_dict (.pdparams).
+    """
     import paddle
 
     if not output:
@@ -83,9 +90,27 @@ def _export_paddle(checkpoint: str, output: Optional[str]):
     state_dict = paddle.load(checkpoint)
     click.echo(f"Loaded checkpoint with {len(state_dict)} parameters")
 
-    # Save as static graph inference model if the checkpoint contains a state_dict
-    paddle.save(state_dict, output + ".pdparams")
-    click.echo(f"✅ Model saved to {output}.pdparams")
+    if model_class and input_shape:
+        # Build model and load weights
+        cls = _import_class(model_class)
+        model_instance = cls()
+        model_instance.set_state_dict(state_dict)
+        model_instance.eval()
+
+        # Convert to static graph
+        shape = _parse_input_spec(input_shape)
+        input_spec = [paddle.static.InputSpec(shape=shape, dtype="float32", name="input")]
+        model_instance = paddle.jit.to_static(model_instance, input_spec=input_spec)
+
+        # Save inference model
+        paddle.jit.save(model_instance, output)
+        click.echo(f"✅ Inference model saved to {output}.pdmodel + {output}.pdiparams")
+    else:
+        # Just save state_dict
+        paddle.save(state_dict, output + ".pdparams")
+        click.echo(f"✅ State dict saved to {output}.pdparams")
+        if not model_class:
+            click.echo("   Tip: use --model-class and --input-shape to export a full inference model")
 
 
 def _export_onnx(

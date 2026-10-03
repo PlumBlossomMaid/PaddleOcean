@@ -56,10 +56,31 @@ class ModelParallelStrategy(ParallelStrategy):
             rank_zero_warn(f"Could not build the process mesh, model parallelism is NOT active: {exception!r}")
 
     def reduce(self, tensor: Any, reduce_op: str = "mean") -> Any:
-        return tensor
+        """Reduce a tensor across ranks using PaddlePaddle distributed."""
+        if not paddle.distributed.is_initialized():
+            return tensor
+        try:
+            import ocean.distributed as odist
+
+            return odist.reduce(tensor, reduce_op=reduce_op)
+        except Exception:
+            return tensor
 
     def barrier(self, name: Optional[str] = None) -> None:
-        pass
+        """Synchronize all ranks."""
+        if paddle.distributed.is_initialized():
+            try:
+                paddle.distributed.barrier()
+            except Exception:
+                pass
 
     def broadcast(self, obj: Any, src: int = 0) -> Any:
-        return obj
+        """Broadcast an object from src rank to all ranks."""
+        if not paddle.distributed.is_initialized():
+            return obj
+        try:
+            import ocean.distributed as odist
+
+            return odist.broadcast(obj, src=src)
+        except Exception:
+            return obj

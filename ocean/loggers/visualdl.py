@@ -104,7 +104,18 @@ class VisualDLLogger(Logger):
 
     @rank_zero_only
     def save(self) -> None:
-        pass
+        """Flush VisualDL writer to disk."""
+        if self._experiment is not None:
+            try:
+                self._experiment.save()
+            except AttributeError:
+                # VisualDL LogWriter doesn't have save(), try flush
+                try:
+                    self._experiment.flush()
+                except AttributeError:
+                    pass
+            except Exception:
+                pass
 
     @rank_zero_only
     def finalize(self, status: str) -> None:

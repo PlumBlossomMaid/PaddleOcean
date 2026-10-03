@@ -202,11 +202,13 @@ class Model(HyperparametersMixin, nn.Layer):
 
     def validation_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         # Keras mode: fall back to forward + loss so Model.evaluate works out
-        # of the box. In Ocean mode the subclass is expected to override this;
-        # we keep a no-op default to stay compatible with existing usage that
-        # runs validation loops without a custom step.
+        # of the box. In Ocean mode the subclass is expected to override this.
         if self.__model__ is not None:
             return self._keras_eval_step(batch)
+        # Ocean mode: no-op default (return None). The user should override
+        # validation_step to compute validation metrics. Returning None here
+        # is intentional for backward compatibility — trainers handle it
+        # gracefully (no metrics logged for validation).
         return None
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:

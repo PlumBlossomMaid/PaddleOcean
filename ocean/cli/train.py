@@ -199,6 +199,11 @@ def train(
     if callbacks:
         trainer_kwargs["callbacks"] = callbacks
 
+    # Set log directory (used by loggers and checkpoints)
+    if log_dir:
+        if "default_root_dir" not in trainer_kwargs:
+            trainer_kwargs["default_root_dir"] = log_dir
+
     if model_instance is None:
         click.echo("Error: no model specified. Use --model or provide 'model' in config.", err=True)
         return
