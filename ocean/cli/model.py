@@ -1,5 +1,7 @@
 """ocean model — export and serve trained models."""
 
+from __future__ import annotations
+
 import importlib
 import os
 from typing import Optional
@@ -7,11 +9,16 @@ from typing import Optional
 import click
 
 
-def _parse_input_spec(input_spec: str):
-    """Parse 'shape,dtype' strings like '1,3,224,224' or '1,3,224,224,float32'."""
-    parts = input_spec.split(",")
-    shape = [int(x) for x in parts[:-1]] if "," in input_spec else [int(x) for x in parts]
-    return shape
+def _import_class(qualified_name: str):
+    """Import 'module.path.ClassName' and return the class."""
+    module_path, class_name = qualified_name.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
+
+
+def _parse_input_spec(input_spec: str) -> list[int]:
+    """Parse comma-separated shape string like '1,3,224,224'."""
+    return [int(x) for x in input_spec.split(",")]
 
 
 @click.group()
@@ -132,18 +139,30 @@ def _export_onnx(
 
 
 @model.command()
-@click.option("--model", "-m", required=True, help="Path to ONNX model or PaddlePaddle inference model.")
+@click.option(
+    "--model", "-m", required=True, help="Path to ONNX, PaddlePaddle inference model, or .pdparams checkpoint."
+)
 @click.option("--port", "-p", default=8501, type=int, help="Serving port.")
 @click.option("--host", default="0.0.0.0", help="Serving host.")
-def serve(model, port, host):
+@click.option(
+    "--model-class", type=str, default=None, help="Model class for .pdparams serving, e.g. 'my_module.MyModel'."
+)
+def serve(model, port, host, model_class):
     """Serve a model via a simple HTTP API.
 
     The server loads the model and exposes a POST /predict endpoint
     that accepts JSON input and returns predictions.
 
+    Supports three model formats:
+    - ONNX (.onnx) — requires onnxruntime
+    - PaddlePaddle inference model (.pdmodel + .pdiparams)
+    - PaddlePaddle state_dict (.pdparams) — requires --model-class
+
     Example:
 
         ocean model serve --model model.onnx --port 8501
+
+        ocean model serve --model checkpoint.pdparams --model-class my_model.MyModel
     """
     try:
         import numpy as np
@@ -157,12 +176,15 @@ def serve(model, port, host):
 
         # Try to load the model
         model_loaded = False
+        serve_mode = None  # "onnx", "inference", "state_dict"
+
         if model.endswith(".onnx"):
             try:
                 import onnxruntime as ort
 
                 session = ort.InferenceSession(model)
                 model_loaded = True
+                serve_mode = "onnx"
                 input_name = session.get_inputs()[0].name
                 click.echo(f"Loaded ONNX model, input: {input_name}")
             except ImportError:
@@ -170,6 +192,24 @@ def serve(model, port, host):
                     "Error: onnxruntime is required to serve ONNX models. Install with: pip install onnxruntime",
                     err=True,
                 )
+                return
+        elif model.endswith(".pdparams"):
+            if not model_class:
+                click.echo("Error: --model-class is required to serve a .pdparams checkpoint.", err=True)
+                return
+            try:
+                import paddle
+
+                cls = _import_class(model_class)
+                model_instance = cls()
+                state_dict = paddle.load(model)
+                model_instance.set_state_dict(state_dict)
+                model_instance.eval()
+                model_loaded = True
+                serve_mode = "state_dict"
+                click.echo(f"Loaded state_dict into {type(model_instance).__name__}")
+            except Exception as e:
+                click.echo(f"Error loading model: {e}", err=True)
                 return
         else:
             try:
@@ -179,6 +219,7 @@ def serve(model, port, host):
                 config = paddle.inference.Config(model + ".pdmodel", model + ".pdiparams")
                 predictor = paddle.inference.create_predictor(config)
                 model_loaded = True
+                serve_mode = "inference"
                 click.echo("Loaded PaddlePaddle inference model")
             except Exception as e:
                 click.echo(f"Error loading PaddlePaddle model: {e}", err=True)
@@ -205,8 +246,15 @@ def serve(model, port, host):
                         self.send_error(400, "Missing 'input' field")
                         return
 
-                    if model.endswith(".onnx"):
+                    if serve_mode == "onnx":
                         result = session.run(None, {input_name: arr})
+                    elif serve_mode == "state_dict":
+                        import paddle
+
+                        tensor = paddle.to_tensor(arr)
+                        with paddle.no_grad():
+                            output_tensor = model_instance(tensor)
+                        result = [output_tensor.numpy()]
                     else:
                         input_names = predictor.get_input_names()
                         input_handle = predictor.get_input_handle(input_names[0])
