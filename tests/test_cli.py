@@ -76,9 +76,16 @@ class TestCLITopLevel:
         assert "cloud" in result.output
 
     def test_cli_no_command(self, runner):
-        # Click groups exit with code 2 when no subcommand is given
+        # Calling a click Group without a subcommand shows help, but the exit
+        # code depends on the click version (0 on click 8.1.x, 2 on 8.2.x).
+        # Assert only the version-stable behaviour: help is displayed and every
+        # subcommand is listed.
         result = runner.invoke(cli, [])
-        assert result.exit_code == 2  # Click's standard "missing command" exit code
+        assert result.exit_code in (0, 2)
+        assert "Usage:" in result.output
+        assert "train" in result.output
+        assert "model" in result.output
+        assert "cloud" in result.output
 
 
 # ── ocean train ───────────────────────────────────────────────────
