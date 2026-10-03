@@ -98,6 +98,9 @@ class EarlyStopping(Callback):
         Split out from the check so the decision can be reduced across ranks in
         one place instead of each branch setting ``should_stop`` on its own.
         """
+        if hasattr(current, "item"):
+            current = current.item()
+
         if self.check_finite and not math.isfinite(current):
             return True, f"EarlyStopping: {self.monitor}={current} is not finite, stopping"
 

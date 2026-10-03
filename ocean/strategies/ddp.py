@@ -263,11 +263,20 @@ class DDPStrategy(ParallelStrategy):
         ``all_reduce`` sums into the caller's tensor, so a mean has to be scaled
         back into that same tensor: dividing into a new one left every caller
         that relied on the in-place result holding the *sum*.
+
+        Supported reduce ops: ``"mean"``, ``"sum"``, ``"min"``, ``"max"``.
         """
         if not self._is_initialized or not isinstance(tensor, paddle.Tensor):
             return tensor
+        reduce_op_map = {
+            "sum": paddle.distributed.ReduceOp.SUM,
+            "mean": paddle.distributed.ReduceOp.SUM,  # divide by world_size below
+            "min": paddle.distributed.ReduceOp.MIN,
+            "max": paddle.distributed.ReduceOp.MAX,
+        }
+        dist_op = reduce_op_map.get(reduce_op, paddle.distributed.ReduceOp.SUM)
         try:
-            paddle.distributed.all_reduce(tensor)
+            paddle.distributed.all_reduce(tensor, op=dist_op)
             if reduce_op == "mean":
                 paddle.assign(tensor / self._world_size, tensor)
         except Exception as exception:

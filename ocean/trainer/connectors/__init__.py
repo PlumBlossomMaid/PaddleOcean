@@ -607,6 +607,12 @@ class _AcceleratorConnector:
         if isinstance(strategy, Strategy):
             return strategy
 
+        import warnings
+
+        warnings.warn(
+            f"Unrecognized strategy {strategy!r}; falling back to SingleDeviceStrategy. "
+            "Valid string options: 'auto', 'single_device', 'ddp', 'ddp_spawn', 'fleet'."
+        )
         return SingleDeviceStrategy()
 
     @staticmethod

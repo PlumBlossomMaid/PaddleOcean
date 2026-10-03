@@ -51,9 +51,6 @@ class Model(HyperparametersMixin, nn.Layer):
         self._current_fx_name: Optional[str] = None
         self._automatic_optimization: bool = True
         self._compiler_ctx: Optional[dict] = None
-        self._log_metrics: dict[str, list[float]] = {}
-        self._training_step_outputs: list[Any] = []
-        self._validation_step_outputs: list[Any] = []
         self._example_input_array: Optional[Any] = None
 
     @property

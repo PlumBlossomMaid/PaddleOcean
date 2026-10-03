@@ -209,7 +209,7 @@ class Trainer:
 
         # === Init with defaults ===
         if max_epochs is None:
-            max_epochs = 1000 if max_steps <= 0 else 1000
+            max_epochs = 1000
         if enable_checkpointing is None:
             enable_checkpointing = True
         if enable_progress_bar is None:
@@ -624,9 +624,6 @@ class Trainer:
             )
             _patch_ddp_attr_forward(ddp_model)
             self._model = ddp_model
-            self._original_model = model
-        else:
-            self._original_model = None
 
         # Optimizer & Strategy setup
         self.optimizers = self._resolve_optimizers(model)
