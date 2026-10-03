@@ -82,7 +82,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install pytest pytest-timeout parameterized scipy librosa tqdm
+          pip install pytest pytest-timeout parameterized scipy librosa tqdm tomli pyyaml
           # click + requests are needed by the cloud CLI tests (ocean.cli.cloud).
           pip install click requests
 
@@ -160,22 +160,54 @@ jobs:
         run: |
           python -c "
           import ocean
+          # Core
           assert hasattr(ocean, 'Model')
           assert hasattr(ocean, 'Trainer')
           assert hasattr(ocean, 'DataModule')
           assert hasattr(ocean, 'Gear')
+          # Callbacks
           assert hasattr(ocean, 'Callback')
           assert hasattr(ocean, 'ModelCheckpoint')
           assert hasattr(ocean, 'EarlyStopping')
+          assert hasattr(ocean, 'BatchSizeFinder')
+          assert hasattr(ocean, 'LRFinder')
+          # Loggers
           assert hasattr(ocean, 'CSVLogger')
           assert hasattr(ocean, 'VisualDLLogger')
+          assert hasattr(ocean, 'TensorBoardLogger')
           assert hasattr(ocean, 'WandbLogger')
           assert hasattr(ocean, 'MLFlowLogger')
           assert hasattr(ocean, 'CometLogger')
+          assert hasattr(ocean, 'DummyLogger')
+          # Strategies
           assert hasattr(ocean, 'DDPStrategy')
           assert hasattr(ocean, 'DeepSpeedStrategy')
           assert hasattr(ocean, 'FSDPStrategy')
+          assert hasattr(ocean, 'ModelParallelStrategy')
+          # Plugins
           assert hasattr(ocean, 'MixedPrecision')
+          assert hasattr(ocean, 'DoublePrecision')
+          assert hasattr(ocean, 'HalfPrecision')
+          assert hasattr(ocean, 'CheckpointIO')
+          assert hasattr(ocean, 'AsyncCheckpointIO')
+          assert hasattr(ocean, 'SyncBN')
+          assert hasattr(ocean, 'ClusterEnvironment')
+          # Profilers
+          assert hasattr(ocean, 'Profiler')
+          assert hasattr(ocean, 'AdvancedProfiler')
+          assert hasattr(ocean, 'PassThroughProfiler')
+          # Accelerators
+          assert hasattr(ocean, 'XPUAccelerator')
+          assert hasattr(ocean, 'ROCmAccelerator')
+          assert hasattr(ocean, 'IPUAccelerator')
+          assert hasattr(ocean, 'CustomDeviceAccelerator')
+          # Utils
+          assert hasattr(ocean, 'ModelRegistry')
+          assert hasattr(ocean, 'to_static')
+          assert hasattr(ocean, 'compile')
+          assert hasattr(ocean, 'consolidate_checkpoint')
+          assert hasattr(ocean, 'upgrade_checkpoint')
+          assert hasattr(ocean, 'migrate_checkpoint')
           assert hasattr(ocean, 'OceanLogger')
           assert hasattr(ocean, 'OceanEnum')
           assert hasattr(ocean, 'seed_everything')
