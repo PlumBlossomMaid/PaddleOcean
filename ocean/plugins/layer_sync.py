@@ -29,5 +29,9 @@ class SyncBN(LayerSync):
         try:
             # Convert BatchNorm to SyncBatchNorm if available
             paddle.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-        except Exception:
-            pass
+        except Exception as e:
+            from ocean.utils.rank_zero import rank_zero_warn
+
+            rank_zero_warn(
+                f"SyncBatchNorm conversion failed; training will proceed with unsynchronized BatchNorm: {e!r}"
+            )

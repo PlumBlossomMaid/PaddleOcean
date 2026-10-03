@@ -108,8 +108,13 @@ class Model(HyperparametersMixin, nn.Layer):
 
     @property
     def on_gpu(self) -> bool:
-        """Whether the model is on a GPU (ocean-compatible)."""
-        return paddle.is_compiled_with_cuda()
+        """Whether the model is actually on a GPU."""
+        if not paddle.is_compiled_with_cuda():
+            return False
+        try:
+            return any(p.place.is_gpu_place() for p in self.parameters())
+        except Exception:
+            return False
 
     @property
     def logger(self) -> Any:
@@ -552,11 +557,18 @@ class Model(HyperparametersMixin, nn.Layer):
         Args:
             state_dict: Dictionary mapping parameter names to tensors.
             strict: If True, keys must match exactly.
+
+        Raises:
+            RuntimeError: If ``strict=True`` and there are missing or unexpected keys.
         """
-        if strict:
-            self.set_state_dict(state_dict)
-        else:
-            self.set_dict(state_dict)
+        missing, unexpected = self.set_state_dict(state_dict)
+        if strict and (missing or unexpected):
+            raise RuntimeError(
+                f"Error(s) in loading state_dict for {type(self).__name__}:\n"
+                f"\tMissing key(s): {sorted(missing)}\n"
+                f"\tUnexpected key(s): {sorted(unexpected)}\n"
+                "Pass `strict=False` to load anyway."
+            )
 
     def on_save_checkpoint(self) -> dict[str, Any]:
         """Hook for adding custom state to checkpoint.
@@ -590,6 +602,8 @@ class Model(HyperparametersMixin, nn.Layer):
         # model with the architecture it was trained with.
         if self.hparams_initial:
             state[CHECKPOINT_HYPER_PARAMS_KEY] = dict(self.hparams_initial)
+        # Call the user-overridable hook so custom state is included.
+        state.update(self.on_save_checkpoint())
         paddle.save(state, path)
 
     def load_checkpoint(
@@ -621,6 +635,8 @@ class Model(HyperparametersMixin, nn.Layer):
             )
         if load_optimizer and "optimizer" in checkpoint and self._optimizer is not None:
             self._optimizer.set_state_dict(checkpoint["optimizer"])
+        # Call the user-overridable hook so custom state is restored.
+        self.on_load_checkpoint(checkpoint)
         # Restore training state
         return checkpoint
 
@@ -670,13 +686,13 @@ class Model(HyperparametersMixin, nn.Layer):
     def evaluate(self, eval_data: Optional[Any] = None, datamodule: Optional[Any] = None) -> list[dict[str, float]]:
         from ocean.trainer import Trainer
 
-        trainer = self.__trainer__ or Trainer()
+        trainer = self.__trainer__ or self._trainer or Trainer()
         return trainer.validate(self, dataloaders=eval_data, datamodule=datamodule)
 
     def predict(self, test_data: Optional[Any] = None, datamodule: Optional[Any] = None) -> list[Any]:
         from ocean.trainer import Trainer
 
-        trainer = self.__trainer__ or Trainer()
+        trainer = self.__trainer__ or self._trainer or Trainer()
         return trainer.predict(self, dataloaders=test_data, datamodule=datamodule)
 
     # ====================================================================
@@ -725,12 +741,12 @@ class Model(HyperparametersMixin, nn.Layer):
         outputs = self.__model__(inputs)
         result: dict[str, Any] = {}
         if self._loss_fns:
+            loss_values = []
             for i, loss_fn in enumerate(self._loss_fns):
                 lv = loss_fn(outputs, labels) if labels is not None else loss_fn(outputs)
                 self.log(f"val_loss_{i}", lv.item())
-            result["loss"] = sum(
-                (loss_fn(outputs, labels) if labels is not None else loss_fn(outputs)) for loss_fn in self._loss_fns
-            )
+                loss_values.append(lv)
+            result["loss"] = sum(loss_values)
         self._update_metrics(outputs, labels)
         return result
 

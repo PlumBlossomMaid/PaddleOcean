@@ -16,10 +16,10 @@ class MixedPrecision(Precision):
     def __init__(self, precision: str = "16-mixed") -> None:
         super().__init__(precision)
         self._scaler = paddle.amp.GradScaler(init_loss_scaling=2.0**15)
-        self._level = "O1" if precision.startswith("16") else "O2"
+        self._level = "O1" if "mixed" in precision else "O2"
 
     def forward_context(self) -> Any:
-        dtype = "float16" if self.precision.startswith("16") else "bfloat16"
+        dtype = "float16" if "16" in self.precision else "bfloat16"
         return paddle.amp.auto_cast(level=self._level, dtype=dtype)
 
     def pre_backward(self, tensor: paddle.Tensor, module: Any) -> paddle.Tensor:

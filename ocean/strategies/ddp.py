@@ -432,3 +432,4 @@ class DDPStrategy(ParallelStrategy):
                 paddle.distributed.barrier()
             except Exception:
                 pass
+        super().teardown()
