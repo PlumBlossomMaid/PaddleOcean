@@ -73,6 +73,9 @@ def submit(name, cmd, path, env, gpus, device, token):
         zip_path = tmp.name
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in code_path.rglob("*"):
+            # Skip symlinks to prevent leaking sensitive files (e.g. ~/.ssh/id_rsa)
+            if f.is_symlink():
+                continue
             if f.is_file() and not f.name.startswith("."):
                 zf.write(f, f.relative_to(code_path))
 
@@ -107,7 +110,8 @@ def submit(name, cmd, path, env, gpus, device, token):
             headers = {"Content-Type": "application/zip"}
             if bos_token:
                 headers["Authorization"] = bos_token
-            upload_resp = req.put(bos_upload_url, data=open(zip_path, "rb"), headers=headers, timeout=300)
+            with open(zip_path, "rb") as f:
+                upload_resp = req.put(bos_upload_url, data=f, headers=headers, timeout=300)
             upload_resp.raise_for_status()
             click.echo("✅ Code uploaded.")
 

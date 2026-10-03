@@ -108,6 +108,8 @@ class ModelCheckpoint(Callback):
     # ------------------------------------------------------------------
 
     def on_validation_end(self, trainer: Any, model: Any) -> None:
+        if self.every_n_epochs is not None and (trainer.current_epoch + 1) % self.every_n_epochs != 0:
+            return
         self._save_if_needed(trainer, model)
 
     def on_train_epoch_end(self, trainer: Any, model: Any) -> None:
@@ -235,6 +237,9 @@ class ModelCheckpoint(Callback):
 
     def _write_checkpoint(self, model: Any, path: str) -> None:
         trainer = model._trainer
+        # Only write on rank 0 to prevent file corruption in DDP
+        if trainer and not getattr(trainer, "is_global_zero", True):
+            return
         if self.save_weights_only:
             state = model.state_dict()
             if hasattr(state, "items"):

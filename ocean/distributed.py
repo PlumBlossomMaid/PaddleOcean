@@ -106,7 +106,7 @@ def all_reduce(tensor: Any, op: str = "mean") -> Any:
     dist_op = reduce_op_map.get(op, paddle.distributed.ReduceOp.SUM)
     paddle.distributed.all_reduce(tensor, op=dist_op)
     if op == "mean":
-        tensor = tensor / get_world_size()
+        paddle.assign(tensor / get_world_size(), output=tensor)
     return tensor
 
 
@@ -143,11 +143,12 @@ def reduce(tensor: Any, dst: int = 0, op: str = "sum") -> Any:
         "mean": paddle.distributed.ReduceOp.SUM,
         "min": paddle.distributed.ReduceOp.MIN,
         "max": paddle.distributed.ReduceOp.MAX,
+        "prod": paddle.distributed.ReduceOp.PROD,
     }
     dist_op = reduce_op_map.get(op, paddle.distributed.ReduceOp.SUM)
     paddle.distributed.reduce(tensor, dst=dst, op=dist_op)
     if op == "mean":
-        tensor = tensor / get_world_size()
+        paddle.assign(tensor / get_world_size(), output=tensor)
     return tensor
 
 
@@ -230,11 +231,12 @@ class stream:
             "mean": paddle.distributed.ReduceOp.SUM,
             "min": paddle.distributed.ReduceOp.MIN,
             "max": paddle.distributed.ReduceOp.MAX,
+            "prod": paddle.distributed.ReduceOp.PROD,
         }
         dist_op = reduce_op_map.get(op, paddle.distributed.ReduceOp.SUM)
         paddle.distributed.stream.all_reduce(tensor, op=dist_op)
         if op == "mean":
-            tensor = tensor / get_world_size()
+            paddle.assign(tensor / get_world_size(), output=tensor)
         return tensor
 
     @staticmethod
@@ -268,11 +270,14 @@ class stream:
         reduce_op_map = {
             "sum": paddle.distributed.ReduceOp.SUM,
             "mean": paddle.distributed.ReduceOp.SUM,
+            "min": paddle.distributed.ReduceOp.MIN,
+            "max": paddle.distributed.ReduceOp.MAX,
+            "prod": paddle.distributed.ReduceOp.PROD,
         }
         dist_op = reduce_op_map.get(op, paddle.distributed.ReduceOp.SUM)
         paddle.distributed.stream.reduce(tensor, dst=dst, op=dist_op)
         if op == "mean":
-            tensor = tensor / get_world_size()
+            paddle.assign(tensor / get_world_size(), output=tensor)
         return tensor
 
     @staticmethod

@@ -316,7 +316,9 @@ def _download_file(url: str, dest: str, token: str | None, desc: str = "", file_
     return str(dest_path)
 
 
-def _lfs_download_real(repo_id: str, oid: str, file_size: int, token: str | None, dest: str, desc: str = "") -> bool:
+def _lfs_download_real(
+    repo_id: str, oid: str, file_size: int, token: str | None, dest: str, desc: str = "", revision: str = "master"
+) -> bool:
     """Download real LFS content from BOS via LFS batch API.
     Returns True on success, False if the LFS object is missing."""
     user_name, repo_name = repo_id.split("/")
@@ -329,7 +331,7 @@ def _lfs_download_real(repo_id: str, oid: str, file_size: int, token: str | None
             "operation": "download",
             "objects": [{"oid": oid, "size": file_size}],
             "transfers": ["lfs-standalone-file", "basic"],
-            "ref": {"name": "refs/heads/master"},
+            "ref": {"name": f"refs/heads/{revision}"},
             "hash_algo": "sha256",
         },
         content_type="application/vnd.git-lfs+json",
@@ -559,6 +561,12 @@ def download(
             """Download a single file. Returns (path, success)."""
             local_rel = entry["_local_rel"]
             local_path = dest / local_rel
+            # Prevent path traversal: ensure local_path is inside dest
+            try:
+                local_path.resolve().relative_to(dest.resolve())
+            except ValueError:
+                click.echo(f"Skipping unsafe path: {local_rel}", err=True)
+                return (local_rel, False)
             expected_size = entry.get("size")
             expected_sha = entry.get("sha")
             try:

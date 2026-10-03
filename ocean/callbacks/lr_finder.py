@@ -48,6 +48,7 @@ class LRFinder(Callback):
 
     def on_train_batch_start(self, trainer: Any, model: Any, batch: Any, batch_idx: int) -> None:
         if self._step >= self.num_training_steps:
+            trainer.should_stop = True
             return
 
         # Compute current LR
@@ -98,10 +99,15 @@ class LRFinder(Callback):
     def _set_lr(self, trainer: Any, lr: float) -> None:
         for opt in self._optimizers(trainer):
             raw = getattr(opt, "_optimizer", opt)
+            if isinstance(getattr(raw, "_learning_rate", None), paddle.optimizer.lr.LRScheduler):
+                raw._learning_rate = lr
+                continue
             try:
                 raw.set_lr(lr)
-            except Exception:
-                pass
+            except Exception as e:
+                from ocean.utils.rank_zero import rank_zero_warn
+
+                rank_zero_warn(f"LRFinder: could not set LR on {type(raw).__name__}: {e!r}")
 
     def _get_lr(self, trainer: Any) -> Optional[float]:
         for opt in self._optimizers(trainer):

@@ -157,8 +157,10 @@ def _export_onnx(
         input_spec = [paddle.static.InputSpec(shape=dyn_shape, dtype="float32", name="input")]
 
     try:
-        paddle.onnx.export(model_instance, output, input_spec=input_spec)
-        click.echo(f"✅ Model exported to {output}.onnx")
+        # paddle.onnx.export appends .onnx if not present; strip it to avoid double extension
+        export_base = output[:-5] if output.endswith(".onnx") else output
+        paddle.onnx.export(model_instance, export_base, input_spec=input_spec)
+        click.echo(f"✅ Model exported to {export_base}.onnx")
     except Exception as e:
         click.echo(f"Error during ONNX export: {e}", err=True)
 

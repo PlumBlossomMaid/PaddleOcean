@@ -191,8 +191,12 @@ class DDPStrategy(ParallelStrategy):
                         self._node_rank = int(env.node_rank)
                     except Exception:
                         self._local_rank = self._rank
-            except Exception:
-                pass
+            except Exception as e:
+                from ocean.utils.rank_zero import rank_zero_warn
+
+                rank_zero_warn(
+                    f"DDPStrategy: distributed init failed ({e!r}); training will run in single-process mode."
+                )
 
         # Step 2: Set device for this process via accelerator
         if self._accelerator:
@@ -382,7 +386,10 @@ class DDPStrategy(ParallelStrategy):
         try:
             ckpt = paddle.load(checkpoint_path)
             return ckpt
-        except Exception:
+        except Exception as e:
+            from ocean.utils.rank_zero import rank_zero_warn
+
+            rank_zero_warn(f"DDPStrategy: could not load checkpoint '{checkpoint_path}': {e!r}")
             return {}
 
     # ==================================================================
